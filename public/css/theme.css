@@ -1,0 +1,50 @@
+/* theme.css — Aegean Sea blue theme. Loaded LAST so it wins.
+   FIX: the previous version made ".brand-text" transparent (invisible
+   "NickSeer"). That rule is removed; the wordmark is now a solid light colour. */
+
+:root {
+  --accent: #1E88C7;          /* Aegean blue (was #e50914) */
+  --accent-strong: #14618f;
+  --accent-2: #6d5ef0;
+  --aegean-1: #2E9BD6;
+  --aegean-2: #0f5687;
+}
+
+/* Buttons */
+.btn-accent { background: var(--accent) !important; color: #fff !important; }
+.btn-accent:hover { background: var(--accent-strong) !important; }
+
+/* Nav active pill tint */
+.nav-link.active { background: rgba(30,136,199,.18) !important; }
+
+/* Brand mark tile → Aegean; wordmark VISIBLE (no transparent clip). */
+.brand-mark svg rect { fill: url(#aegeanBrand) !important; }
+.brand-text {
+  background: none !important;
+  -webkit-background-clip: initial !important; background-clip: initial !important;
+  color: #eaf6ff !important; -webkit-text-fill-color: #eaf6ff !important;
+  font-weight: 800; letter-spacing: -.02em; text-shadow: 0 1px 2px rgba(0,0,0,.35);
+}
+
+/* Progress bars / accents that were red */
+.bar > i { background: linear-gradient(90deg, var(--aegean-2), var(--aegean-1)) !important; }
+
+/* Live tab accents */
+.live-dot { background: var(--accent) !important; box-shadow: 0 0 12px var(--accent) !important; }
+.live-sub button.on { background: var(--accent) !important; }
+.live-bar > i { background: linear-gradient(90deg, var(--aegean-2), var(--aegean-1)) !important; }
+
+/* Request modal accent */
+.req-check { background: radial-gradient(circle at 50% 40%, var(--aegean-1), var(--aegean-2)) !important; box-shadow: 0 10px 30px rgba(30,136,199,.4) !important; }
+
+/* Login button gradient → Aegean */
+.login-btn { background: linear-gradient(135deg, var(--accent), var(--aegean-2)) !important; }
+
+/* Stats total tile tint */
+.stat-total { background: linear-gradient(135deg, rgba(30,136,199,.20), rgba(15,86,135,.16)) !important; border-color: rgba(30,136,199,.4) !important; }
+
+/* Segmented controls active + settings tab underline */
+.seg button.active { background: var(--accent) !important; }
+.settings-tab.active { border-bottom-color: var(--accent) !important; }
+
+/* Toasts / status "bad" stay red — that's an error colour, not a brand accent. */

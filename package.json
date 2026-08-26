@@ -1,0 +1,11 @@
+{
+  "name": "nickseer",
+  "version": "1.3.0",
+  "description": "NickSeer - a beautiful, self-hosted media discovery & request front-end that connects to Plex, Tautulli, Radarr, Sonarr, SABnzbd and Gluetun via API keys, with a smarter recommendation brain, streaming Top 10 rows, IMDb Top 250, IMDb ratings, a rotating hero, 24h auto-refresh and built-in trailers.",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": { "start": "node server/index.js" },
+  "dependencies": {},
+  "engines": { "node": ">=20" },
+  "license": "MIT"
+}

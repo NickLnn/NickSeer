@@ -1,0 +1,29 @@
+# NickSeer — Synology Container Manager / Docker Compose stack.
+# NickSeer stays on the normal bridge network (NOT behind Gluetun) because it
+# needs LAN access to talk to Plex/Radarr/Sonarr/SAB/Tautulli/Gluetun by API.
+# No API keys live here — everything is entered in the app's Settings page and
+# stored in ./config/settings.json on the NAS.
+
+services:
+  nickseer:
+    build: .
+    container_name: nickseer
+    restart: unless-stopped
+    # Run as the same user/group as your other containers so the mounted
+    # ./config folder is writable without permission clashes.
+    user: "1026:100"
+    environment:
+      - PORT=5056
+      - CONFIG_DIR=/config
+      - TZ=${TZ:-Europe/Athens}
+      - PUID=${PUID:-1026}
+      - PGID=${PGID:-100}
+    ports:
+      - "5056:5056"
+    volumes:
+      - ./config:/config
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5056/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

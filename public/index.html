@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0a0f" />
+  <title>NickSeer</title>
+  <link rel="preconnect" href="https://image.tmdb.org" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="stylesheet" href="/css/enhance.css" />
+  <link rel="stylesheet" href="/css/theme.css" />
+</head>
+<body>
+  <div id="ambient" class="ambient"></div>
+
+  <header class="topbar" id="topbar">
+    <div class="brand" data-nav>
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-text">NickSeer</span>
+    </div>
+    <nav class="nav-links">
+      <button class="nav-link active" data-nav data-view="home">Home</button>
+      <button class="nav-link" data-nav data-view="movies">Movies</button>
+      <button class="nav-link" data-nav data-view="shows">TV</button>
+      <button class="nav-link" data-nav data-view="ai">AI Suggestions</button>
+      <button class="nav-link" data-nav data-view="streaming">Streaming</button>
+      <button class="nav-link" data-nav data-view="new">New</button>
+      <button class="nav-link" data-nav data-view="boxoffice">Box Office</button>
+      <button class="nav-link" data-nav data-view="coming">Coming Soon</button>
+      <button class="nav-link" data-nav data-view="live">Live Streaming</button>
+      <button class="nav-link" data-nav data-view="approvals" style="display:none">Approvals</button>
+      <button class="nav-link" data-nav data-view="status">Downloads</button>
+      <button class="nav-link" data-nav data-view="info">Info</button>
+    </nav>
+    <div class="topbar-right">
+      <div class="search-box"><input id="search" type="search" placeholder="Search…" data-nav autocomplete="off" /></div>
+      <button id="refreshBtn" class="icon-btn" data-nav title="Refresh now" aria-label="Refresh">⟳</button>
+      <button id="profileBtn" class="profile-btn" data-nav title="Profile"><span id="profileInitial">N</span></button>
+      <button id="settingsBtn" class="icon-btn" data-nav title="Settings" aria-label="Settings">⚙</button>
+    </div>
+  </header>
+
+  <main id="app" class="app"></main>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-backdrop" id="modalBackdrop"></div>
+    <div class="modal-card" id="modalCard"></div>
+  </div>
+
+  <div id="settings" class="settings-overlay hidden"></div>
+  <div id="login" class="login-overlay hidden"></div>
+  <div id="toasts" class="toasts"></div>
+
+  <script type="module" src="/js/nav.js"></script>
+  <script type="module" src="/js/settings.js"></script>
+  <script type="module" src="/js/app.js"></script>
+  <script type="module" src="/js/logo.js"></script>
+  <script type="module" src="/js/brands.js"></script>
+  <script type="module" src="/js/menu.js"></script>
+  <script type="module" src="/js/plexcard.js"></script>
+  <script type="module" src="/js/stats.js"></script>
+  <script type="module" src="/js/live.js"></script>
+  <script type="module" src="/js/info.js"></script>
+  <script type="module" src="/js/settings-ai.js"></script>
+  <script type="module" src="/js/settings-tuning.js"></script>
+  <script type="module" src="/js/aisuggest.js"></script>
+  <script type="module" src="/js/buttons.js"></script>
+  <script type="module" src="/js/approvals.js"></script>
+  <script type="module" src="/js/roles.js"></script>
+  <script type="module" src="/js/imdb-badge.js"></script>
+  <script type="module" src="/js/fixes.js"></script>
+  <script type="module" src="/js/login-enhance.js"></script>
+</body>
+</html>

@@ -1,0 +1,38 @@
+# ============================================================
+# NickSeer — .gitignore
+# CRITICAL: this keeps your personal data and API keys out of git.
+# Everything under config/ is YOUR runtime data — never commit it.
+# ============================================================
+
+# Your entire config volume (settings.json has ALL your API keys,
+# Plex token, OMDb key, TMDB key, user accounts/password hashes, etc.)
+config/
+config/**
+*.settings.json
+settings.json
+
+# Local env files (if you ever add a .env with secrets)
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# Backups you made while debugging
+*.bak
+*.bak.*
+*.full.html.bak
+
+# Docker build artifacts
+*.log

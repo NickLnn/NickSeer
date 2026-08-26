@@ -1,0 +1,79 @@
+/* NickSeer enhancements — Apple typography, real streaming brand logos on row
+   titles, detail ownership badges, Plex status card, Approvals tab, Plex login.
+   Loaded AFTER styles.css. */
+
+html, body { font-family: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+.row-title { font-weight: 700; letter-spacing: -0.02em; font-size: 21px; }
+.hero-title { font-weight: 800; letter-spacing: -0.035em; }
+.modal-title { font-weight: 800; letter-spacing: -0.03em; }
+.section-label { letter-spacing: 0.10em; font-weight: 700; }
+.brand-text { font-weight: 800; letter-spacing: -0.02em; }
+.brand-mark { background: transparent !important; box-shadow: none !important; width: 34px; height: 34px; display: inline-grid; place-items: center; }
+.brand-mark svg { display: block; border-radius: 9px; box-shadow: 0 6px 18px rgba(109,94,240,.35); }
+
+/* Row title with streaming brand logo */
+.row-title-wrap { display: inline-flex; align-items: center; gap: 10px; }
+.brand-badge { width: 30px; height: 30px; border-radius: 8px; display: inline-grid; place-items: center; flex: 0 0 auto; box-shadow: 0 2px 8px rgba(0,0,0,.4); overflow: hidden; }
+.brand-badge svg { width: 30px; height: 30px; display: block; }
+
+/* Detail: title row + ownership badges */
+.title-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.own-badges { display: inline-flex; align-items: center; gap: 8px; }
+.own-pill { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06); color: #d6d6de; }
+.own-pill.in-lib { background: rgba(53,208,127,.16); border-color: rgba(53,208,127,.5); color: #7ef0b0; }
+.own-pill.cont  { background: rgba(109,94,240,.16); border-color: rgba(109,94,240,.5); color: #c9c2ff; }
+.own-tick { width: 16px; height: 16px; border-radius: 50%; display: inline-grid; place-items: center; background: #35d07f; color: #04150b; font-size: 11px; font-weight: 900; }
+.ep-ring { display: inline-flex; align-items: center; gap: 8px; padding: 3px 10px 3px 4px; border-radius: 999px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); }
+.ep-ring .ring { width: 30px; height: 30px; border-radius: 50%; background: conic-gradient(#35d07f calc(var(--p,0)*1%), rgba(255,255,255,.14) 0); display: grid; place-items: center; }
+.ep-ring .ring i { width: 22px; height: 22px; border-radius: 50%; background: var(--bg-2,#12121a); display: grid; place-items: center; font-size: 9px; font-weight: 800; color: #eaeaf0; font-style: normal; }
+.ep-ring.full .ring { background: conic-gradient(#f5c518 100%, #f5c518 0); }
+.ep-ring .lbl { font-size: 12px; font-weight: 700; color: #cfcfd6; }
+.ep-ring.full .lbl { color: #f5c518; }
+
+/* Plex status card */
+.plex-stat { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 4px; }
+.plex-num { text-align: center; }
+.plex-num b { display: block; font-size: 26px; font-weight: 900; color: #fff; letter-spacing: -.02em; }
+.plex-num span { font-size: 12px; color: var(--muted,#9aa0ad); font-weight: 600; }
+.plex-sec { color: var(--muted,#9aa0ad); font-size: 12.5px; margin-top: 8px; }
+
+/* Approvals */
+.appr-list { display: flex; flex-direction: column; gap: 12px; padding: 8px 40px 30px; }
+.appr-row { display: flex; align-items: center; gap: 14px; background: var(--card,#1a1a24); border: 1px solid rgba(255,255,255,.06); border-radius: 14px; padding: 12px 14px; }
+.appr-poster { width: 52px; height: 78px; border-radius: 8px; object-fit: cover; background: #22222e; flex: 0 0 auto; }
+.appr-main { flex: 1; min-width: 0; }
+.appr-title { font-weight: 800; }
+.appr-sub { font-size: 12.5px; color: var(--muted,#9aa0ad); }
+.appr-status { font-size: 11px; font-weight: 800; padding: 3px 9px; border-radius: 999px; }
+.appr-status.pending { background: rgba(245,197,24,.16); color: #f5c518; }
+.appr-status.approved { background: rgba(53,208,127,.16); color: #7ef0b0; }
+.appr-status.declined { background: rgba(229,9,20,.14); color: #ff9a9a; }
+.appr-actions { display: flex; gap: 8px; }
+.appr-btn { border: 0; border-radius: 9px; padding: 8px 14px; font-weight: 800; font-size: 13px; cursor: pointer; }
+.appr-btn.ok { background: #35d07f; color: #04150b; }
+.appr-btn.no { background: rgba(229,9,20,.15); color: #ff9a9a; border: 1px solid rgba(229,9,20,.4); }
+
+/* Login (Plex button) */
+.login-overlay { position: fixed; inset: 0; z-index: 85; display: grid; place-items: center; background: radial-gradient(1200px 700px at 50% -10%, rgba(109,94,240,.25), transparent), #06060a; }
+.login-overlay.hidden { display: none; }
+.login-card { width: min(400px, 92vw); background: rgba(18,18,26,.9); border: 1px solid rgba(255,255,255,.08); border-radius: 20px; padding: 34px 30px; box-shadow: 0 30px 80px rgba(0,0,0,.6); text-align: center; backdrop-filter: blur(10px); }
+.login-logo svg { width: 66px; height: 66px; border-radius: 16px; box-shadow: 0 12px 30px rgba(109,94,240,.4); margin: 0 auto 14px; display: block; }
+.login-card h1 { font-size: 26px; font-weight: 900; letter-spacing: -.03em; margin: 0 0 4px; }
+.login-card p { color: var(--muted,#9aa0ad); margin: 0 0 22px; font-size: 14px; }
+.login-field { text-align: left; margin-bottom: 14px; }
+.login-field label { display: block; font-size: 12px; font-weight: 700; color: var(--muted,#9aa0ad); margin-bottom: 6px; }
+.login-field input { width: 100%; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.05); color: #fff; outline: none; font-size: 15px; }
+.login-field input:focus { border-color: var(--accent-2,#6d5ef0); background: rgba(255,255,255,.09); }
+.login-btn { width: 100%; margin-top: 6px; padding: 13px; font-size: 15px; font-weight: 800; border: 0; border-radius: 12px; background: linear-gradient(135deg, var(--accent-2,#6d5ef0), #e50914); color: #fff; cursor: pointer; }
+.login-plex { width: 100%; margin-top: 12px; padding: 13px; font-size: 15px; font-weight: 800; border: 0; border-radius: 12px; background: #e5a00d; color: #1b1b1b; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 10px; }
+.login-plex:hover { filter: brightness(1.05); }
+.login-or { color: var(--muted,#9aa0ad); font-size: 12px; margin: 16px 0 4px; }
+.login-err { color: #ff6b6b; font-size: 13px; font-weight: 700; min-height: 18px; margin-top: 10px; }
+
+/* Users tab bits */
+.user-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,.06); }
+.user-av { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; font-weight: 800; color: #fff; background: linear-gradient(135deg,#6d5ef0,#a78bfa); flex: 0 0 auto; background-size: cover; }
+.user-name { font-weight: 700; } .user-role { font-size: 12px; color: var(--muted,#9aa0ad); }
+.user-actions { margin-left: auto; display: flex; gap: 8px; }
+.mini-btn { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); color: #eaeaf0; border-radius: 8px; padding: 6px 10px; font-weight: 700; font-size: 12px; cursor: pointer; }
+.mini-btn.danger { color: #ff9a9a; border-color: rgba(255,107,107,.4); background: rgba(229,9,20,.1); }
