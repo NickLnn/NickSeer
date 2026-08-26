@@ -33,6 +33,33 @@ pre-configured; every credential is entered by you, live, in the browser, and
 saved only to your local `./config/settings.json` (which is **not** part of
 this repo and is `.gitignore`d).
 
+## 🐳 Running with Docker
+
+```yaml
+version: "3.8"
+
+services:
+  nickseer:
+    image: ghcr.io/nicklnn/nickseer:latest
+    container_name: nickseer
+    restart: unless-stopped
+    ports:
+      - "5056:5056"
+    environment:
+      - TZ=Europe/Athens
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - ./config:/app/config   # stores your settings & API keys — created automatically on first run
+```
+
+1. Save this as `docker-compose.yml` in a folder of your choice.
+2. Run:
+   ```bash
+   docker compose up -d
+   ```
+3. Open `http://<your-server-ip>:5056` and enter your API keys under **Settings**.
+
 ### Requirements
 - Docker + Docker Compose
 - A [TMDB API key](https://www.themoviedb.org/settings/api) (free)
