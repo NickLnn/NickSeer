@@ -23,7 +23,7 @@ A modern, self-hosted discovery hub and request manager for **Plex** & **Jellyfi
 - **Centered Responsive Search Grid:** Vertical scrolling CSS grid optimized for mobile touch screens with zero horizontal drift.
 - **Bottom-Sheet Modal:** Full viewport clearance over mobile navigation bars with thumb-friendly action buttons.
 
-### 🔐 4. Netflix-Style Sign-In & Multi-User Profiles
+### 🔐 4. Multi-User Profiles
 - **Dynamic Trending Wallpaper:** Weekly auto-refreshing TMDB poster mosaic with cinematic radial vignette and glassmorphic sign-in card.
 - **Plex OAuth & Local Logins:** One-click *"Sign in with Plex"* or local family accounts.
 - **"Who's Watching?" Profile Picker:** Switch between family profiles seamlessly.
