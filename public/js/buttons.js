@@ -1,9 +1,7 @@
-// buttons.js — detail-modal YouTube / IMDb actions as SUBTLE, consistent dark
-// pills with a small official logo (no big yellow block, no ugly duplicate text).
-// YouTube → small red play glyph. IMDb → small yellow IMDb chip. Both on the
-// same dark translucent pill so they look tidy next to Request.
-const YT_LOGO = `<svg width="22" height="16" viewBox="0 0 22 16" aria-label="YouTube"><rect width="22" height="16" rx="4" fill="#FF0000"/><path d="M9 4.5l5 3.5-5 3.5z" fill="#fff"/></svg>`;
-const IMDB_LOGO = `<span style="background:#f5c518;color:#000;font-family:Arial,Helvetica,sans-serif;font-weight:900;font-size:10px;letter-spacing:.2px;padding:2px 4px;border-radius:3px;line-height:1">IMDb</span>`;
+// buttons.js — High-Definition YouTube Trailer & IMDb Action Badges.
+const YT_LOGO = `<svg width="22" height="16" viewBox="0 0 22 16" aria-label="YouTube" style="display:block"><rect width="22" height="16" rx="4" fill="#FF0000"/><path d="M9 4.5l5 3.5-5 3.5z" fill="#fff"/></svg>`;
+
+const IMDB_LOGO = `<svg viewBox="0 0 40 20" width="34" height="17" style="display:block"><rect width="40" height="20" rx="3.5" fill="#F5C518"/><text x="3.5" y="15" font-family="'Arial Black',Impact,sans-serif" font-weight="900" font-size="13" fill="#000000" letter-spacing="-0.5">IMDb</text></svg>`;
 
 function styleGhost(btn) {
   btn.style.display = 'inline-flex';
@@ -18,6 +16,7 @@ function styleGhost(btn) {
   btn.style.fontSize = '13.5px';
   btn.style.textDecoration = 'none';
 }
+
 function upgradeButton(btn) {
   if (!btn || btn.dataset.logoBtn) return;
   const txt = (btn.textContent || '').trim();
@@ -34,9 +33,20 @@ function upgradeButton(btn) {
     btn.setAttribute('title', 'View on IMDb');
   }
 }
-function upgradeIn(root) { (root || document).querySelectorAll('.modal-actions a, .modal-actions button, a.btn-imdb, a.btn-yt, a.btn-ghost').forEach(upgradeButton); }
+
+function upgradeIn(root) {
+  (root || document).querySelectorAll('.modal-actions a, .modal-actions button, a.btn-imdb, a.btn-yt, a.btn-ghost').forEach(upgradeButton);
+}
 window.__nsUpgradeButtons = upgradeIn;
 
-const obs = new MutationObserver((muts) => { for (const m of muts) for (const n of m.addedNodes) { if (n.nodeType !== 1) continue; if (n.matches && n.matches('.modal-actions a, .modal-actions button')) upgradeButton(n); if (n.querySelectorAll) upgradeIn(n); } });
+const obs = new MutationObserver((muts) => {
+  for (const m of muts) {
+    for (const n of m.addedNodes) {
+      if (n.nodeType !== 1) continue;
+      if (n.matches && n.matches('.modal-actions a, .modal-actions button')) upgradeButton(n);
+      if (n.querySelectorAll) upgradeIn(n);
+    }
+  }
+});
 obs.observe(document.body, { childList: true, subtree: true });
 setTimeout(() => upgradeIn(document), 400);

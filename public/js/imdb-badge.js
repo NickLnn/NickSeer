@@ -1,4 +1,4 @@
-// imdb-badge.js — IMDb rating (official yellow mini logo) on every poster + TMDB secondary.
+// imdb-badge.js — High-Definition Official IMDb & TMDB Poster Badges
 function authHeaders() { const t = localStorage.getItem('nickseer_token'); return t ? { Authorization: 'Bearer ' + t } : {}; }
 
 const idByTitle = new Map();
@@ -77,14 +77,16 @@ function injectStyles() {
   if (document.getElementById('imdbbadge-styles')) return;
   const css = `
   .rating-badge-group{position:absolute;top:6px;left:6px;display:inline-flex;align-items:center;gap:4px;z-index:4;pointer-events:none;}
-  .imdb-card-badge{display:inline-flex;align-items:center;gap:3.5px;background:rgba(12,12,16,.88);backdrop-filter:blur(4px);border:1px solid rgba(245,197,24,.3);border-radius:6px;padding:2.5px 6px;line-height:1;box-shadow:0 2px 8px rgba(0,0,0,.5);}
-  .imdb-card-badge .lg{background:#f5c518;color:#000;font-family:Arial,Helvetica,sans-serif;font-weight:900;font-size:8px;letter-spacing:.2px;padding:1px 3px;border-radius:2.5px;line-height:1;}
-  .imdb-card-badge .sc{color:#fff;font-weight:800;font-size:11px;line-height:1;}
-  .tmdb-mini-badge{display:inline-flex;align-items:center;gap:2px;background:rgba(18,24,38,.85);backdrop-filter:blur(4px);border:1px solid rgba(1,180,228,.35);border-radius:6px;padding:2.5px 5px;line-height:1;font-size:10px;font-weight:700;color:#90cea1;}
-  .tmdb-mini-badge .tmdb-lbl{font-size:7.5px;font-weight:800;color:#01b4e4;text-transform:uppercase;}
+  .imdb-card-badge{display:inline-flex;align-items:center;gap:4px;background:rgba(12,12,16,.92);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);border:1px solid rgba(245,197,24,.35);border-radius:6px;padding:2px 5px;line-height:1;box-shadow:0 3px 10px rgba(0,0,0,.6);}
+  .imdb-card-badge .imdb-svg{display:block;}
+  .imdb-card-badge .sc{color:#fff;font-weight:900;font-size:11px;line-height:1;letter-spacing:-.2px;}
+  .tmdb-mini-badge{display:inline-flex;align-items:center;gap:3px;background:rgba(18,24,38,.88);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);border:1px solid rgba(1,180,228,.35);border-radius:6px;padding:2px 5px;line-height:1;font-size:10px;font-weight:800;color:#90cea1;box-shadow:0 3px 10px rgba(0,0,0,.6);}
+  .tmdb-mini-badge .tmdb-lbl{font-size:7px;font-weight:900;color:#01b4e4;letter-spacing:.2px;}
   `;
   const st = document.createElement('style'); st.id = 'imdbbadge-styles'; st.textContent = css; document.head.appendChild(st);
 }
+
+const IMDB_MINI_SVG = `<svg viewBox="0 0 32 16" width="22" height="11" class="imdb-svg"><rect width="32" height="16" rx="2.5" fill="#F5C518"/><text x="2" y="12.5" font-family="'Arial Black',Impact,sans-serif" font-weight="900" font-size="10.5" fill="#000000" letter-spacing="-0.4">IMDb</text></svg>`;
 
 function paintCard(card) {
   const nameEl = card.querySelector('.card-name'); const yearEl = card.querySelector('.card-year');
@@ -94,7 +96,6 @@ function paintCard(card) {
   if (!rec) return;
   const id = rec.id;
 
-  // Read TMDB rating from card badge before removal
   let tmdbRating = null;
   const oldBadge = card.querySelector('.card-badge');
   if (oldBadge) {
@@ -117,22 +118,19 @@ function paintCard(card) {
   const group = document.createElement('div');
   group.className = 'rating-badge-group';
   
-  // IMDb rating badge (primary)
   if (imdbRating != null) {
     const b = document.createElement('div');
     b.className = 'imdb-card-badge';
-    b.innerHTML = `<span class="lg">IMDb</span><span class="sc">${Number(imdbRating).toFixed(1)}</span>`;
+    b.innerHTML = `${IMDB_MINI_SVG}<span class="sc">${Number(imdbRating).toFixed(1)}</span>`;
     group.appendChild(b);
   }
 
-  // TMDB secondary badge
   if (tmdbRating != null && imdbRating != null) {
     const t = document.createElement('div');
     t.className = 'tmdb-mini-badge';
     t.innerHTML = `<span class="tmdb-lbl">TMDB</span><span>${Number(tmdbRating).toFixed(1)}</span>`;
     group.appendChild(t);
   } else if (imdbRating == null && tmdbRating != null) {
-    // Only TMDB available (fallback)
     const t = document.createElement('div');
     t.className = 'tmdb-mini-badge';
     t.innerHTML = `<span style="color:#f5c518">★</span><span>${Number(tmdbRating).toFixed(1)}</span>`;

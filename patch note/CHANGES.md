@@ -4,6 +4,13 @@ All historical patches and architectural updates are preserved chronologically b
 
 ---
 
+## 📅 2026-08-28 03:14 — High-Definition Vector Streaming Logos & IMDb/TMDB Badges
+- **File:** 2026-08-28_03-14_hd_vector_brand_logos.md
+- **Details:** Replaced all streaming brand logos (Netflix, Disney+, Prime Video, HBO Max, Apple TV+, Paramount+) with pixel-perfect, high-definition SVG vectors. Upgraded IMDb and TMDB badges with official vector artwork.
+
+
+---
+
 ## 📅 2026-08-28 02:55 — Admin Role Gating for Info & Live Streaming
 - **File:** `2026-08-28_02-55_admin_role_gating_info_live.md`
 - **Details:** Gated `Info` (System Health) and `Live Streaming` (Active sessions/stats) to `admin` role only. Protected backend routes `/api/health-detail` and `/api/discover/live/*` with 403 status. Added automatic client-side redirect to Home for non-admin navigation attempts.
