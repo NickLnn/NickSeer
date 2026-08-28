@@ -22,7 +22,7 @@ Radarr/Sonarr, all in a Netflix-style UI.
 ## 🚀 Quick Start (Docker Compose)
 
 ```bash
-git clone https://github.com/<your-username>/nickseer.git
+git clone https://github.com/NickLnn/NickSeer.git
 cd nickseer
 docker compose up -d --build
 ```
@@ -50,7 +50,7 @@ services:
       - PUID=1000
       - PGID=1000
     volumes:
-      - ./config:/app/config   # stores your settings & API keys — created automatically on first run
+      - ./config:/config   # stores your settings & API keys — created automatically on first run
 ```
 
 1. Save this as `docker-compose.yml` in a folder of your choice.
