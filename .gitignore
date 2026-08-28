@@ -38,3 +38,6 @@ Thumbs.db
 *.log
 
 .agents/
+
+patch note/
+patch note/**

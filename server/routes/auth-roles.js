@@ -1,6 +1,6 @@
 // auth-roles.js — adds the "change a user's role" endpoint (Admin ⇄ Requester).
 // Creating a user with a role already worked; this lets an admin change an
-// EXISTING user's role later (e.g. promote Babis to Admin, or demote someone
+// EXISTING user's role later (e.g. promote a user to Admin, or demote someone
 // back to Requester). Mounted at the same /api/auth base as the main auth
 // router — purely additive, does not touch or duplicate any existing route.
 import express from '../mini.js';

@@ -161,3 +161,196 @@ html, body {
     height: calc(58px + env(safe-area-inset-bottom));
   }
 }
+/* ==========================================================================
+   🔑 AEGEAN LOGIN OVERLAY & RE-AUTH MODAL
+   ========================================================================== */
+.login-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(1200px 700px at 50% -10%, rgba(46,155,214,.2), transparent), #060911;
+}
+.login-overlay.hidden { display: none; }
+
+.login-card {
+  width: min(400px, 92vw);
+  background: rgba(14, 18, 28, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 24px;
+  padding: 36px 30px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.8), 0 0 40px rgba(46,155,214, 0.15);
+  text-align: center;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  animation: loginPop .25s cubic-bezier(0.16, 1, 0.3, 1);
+  box-sizing: border-box;
+}
+@keyframes loginPop {
+  from { transform: scale(0.92); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.login-logo {
+  width: 58px;
+  height: 58px;
+  margin: 0 auto 16px;
+  display: grid;
+  place-items: center;
+}
+.login-logo svg {
+  width: 58px;
+  height: 58px;
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(46,155,214,.4);
+  display: block;
+}
+
+.login-card h1 {
+  font-size: 26px;
+  font-weight: 900;
+  letter-spacing: -.03em;
+  margin: 0 0 4px;
+  color: #f0f7ff;
+}
+.login-card p {
+  color: #9aa7bd;
+  margin: 0 0 24px;
+  font-size: 14px;
+}
+
+.login-field {
+  text-align: left;
+  margin-bottom: 14px;
+}
+.login-field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: #9aa7bd;
+  margin-bottom: 6px;
+}
+.login-field input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  outline: none;
+  font-size: 15px;
+  transition: all .15s;
+}
+.login-field input:focus {
+  border-color: #2E9BD6;
+  background: rgba(255, 255, 255, 0.09);
+  box-shadow: 0 0 15px rgba(46,155,214,.25);
+}
+
+.login-btn {
+  width: 100%;
+  margin-top: 8px;
+  padding: 13px;
+  font-size: 15px;
+  font-weight: 800;
+  border: 0;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #2E9BD6, #0f5687);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 4px 18px rgba(46,155,214,.35);
+  transition: filter .15s;
+}
+.login-btn:hover {
+  filter: brightness(1.1);
+}
+
+.login-plex {
+  width: 100%;
+  margin-top: 12px;
+  padding: 13px;
+  font-size: 14.5px;
+  font-weight: 800;
+  border: 0;
+  border-radius: 12px;
+  background: #e5a00d;
+  color: #1b1b1b;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  transition: filter .15s;
+}
+.login-plex:hover {
+  filter: brightness(1.08);
+}
+
+.login-or {
+  color: #6e7785;
+  font-size: 12px;
+  margin: 16px 0 4px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.login-err {
+  color: #ff6b6b;
+  font-size: 13px;
+  font-weight: 700;
+  min-height: 18px;
+  margin-top: 10px;
+}
+/* ==========================================================================
+   🎬 NETFLIX-STYLE TRENDING POSTER WALLPAPER & VIGNETTE
+   ========================================================================== */
+.login-wallpaper-layer {
+  position: absolute;
+  inset: -40px;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+.login-poster-mosaic {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 12px;
+  width: 110%;
+  height: 110%;
+  transform: rotate(-4deg) scale(1.08);
+  filter: saturate(1.15) brightness(0.65);
+}
+
+.login-poster-item {
+  width: 100%;
+  aspect-ratio: 2/3;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+  background: #0d111a;
+}
+.login-poster-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.login-vignette-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: radial-gradient(circle at 50% 50%, rgba(6, 10, 18, 0.65) 0%, rgba(3, 5, 10, 0.88) 65%, #03050a 100%);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  pointer-events: none;
+}
+
+.login-overlay .login-card {
+  position: relative;
+  z-index: 10;
+}
