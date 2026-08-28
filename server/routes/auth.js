@@ -43,6 +43,19 @@ function recordSuccessfulLogin(ip) {
 }
 
 
+router.get('/profiles', (req, res) => {
+  const c = load();
+  const users = (c.auth?.users || []).map(u => ({
+    id: u.username,
+    name: u.username,
+    thumb: u.thumb || '',
+    role: u.role || 'user',
+    isAccount: true,
+    plex: !!u.plexToken
+  }));
+  res.json({ ok: true, profiles: users });
+});
+
 router.get('/status', (req, res) => {
   const c = load();
   res.json({ enabled: auth.isEnabled(), hasAdmin: auth.hasAnyAdmin(), plexLogin: c.plexAuth?.enabled !== false, approvals: !!c.auth?.approvals });

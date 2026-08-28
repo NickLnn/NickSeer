@@ -42,7 +42,7 @@ app.use((req, res, next) => {
   if (!c.auth?.enabled) return next();
   if (!p.startsWith('/api')) return next();
   if (p === '/api/health') return next();
-  if (p.startsWith('/api/auth/login') || p.startsWith('/api/auth/status') || p.startsWith('/api/auth/plex/start') || p.startsWith('/api/auth/plex/poll')) return next();
+  if (p.startsWith('/api/auth/login') || p.startsWith('/api/auth/status') || p.startsWith('/api/auth/profiles') || p.startsWith('/api/auth/plex')) return next();
   if (p.startsWith('/api/public')) return next();
 
   const tok = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');

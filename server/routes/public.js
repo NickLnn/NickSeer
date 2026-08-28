@@ -64,4 +64,51 @@ router.get('/backdrops', async (req, res) => {
   }
 });
 
+import plexauth from '../services/plexauth.js';
+import auth from '../services/auth.js';
+
+router.get('/profiles', (req, res) => {
+  const c = load();
+  const users = (c.auth?.users || []).map(u => ({
+    id: u.username,
+    name: u.username,
+    thumb: u.thumb || '',
+    role: u.role || 'user',
+    isAccount: true,
+    plex: !!u.plexToken
+  }));
+  res.json({ ok: true, profiles: users });
+});
+
+router.post('/plex/pin', async (req, res) => {
+  try {
+    const { forwardUrl } = req.body || {};
+    const pin = await plexauth.createPin(forwardUrl);
+    res.json({ ok: true, id: pin.id, code: pin.code, authUrl: pin.authUrl });
+  } catch (e) {
+    res.status(200).json({ ok: false, error: e.message });
+  }
+});
+
+router.get('/plex/check/:id', async (req, res) => {
+  try {
+    const claim = await plexauth.claimPin(req.params.id);
+    if (!claim.claimed) return res.json({ ok: true, pending: true });
+
+    const pUser = await plexauth.getUser(claim.authToken);
+    const user = auth.findOrCreatePlexUser({
+      plexId: String(pUser.id),
+      username: pUser.username || pUser.title || 'plex_' + pUser.id,
+      email: pUser.email,
+      thumb: pUser.thumb,
+      plexToken: claim.authToken
+    });
+
+    const token = auth.makeToken(user);
+    res.json({ ok: true, pending: false, token, user });
+  } catch (e) {
+    res.status(200).json({ ok: false, error: e.message });
+  }
+});
+
 export default router;

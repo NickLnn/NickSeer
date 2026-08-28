@@ -121,11 +121,17 @@ export function renderAegeanLogin(onSuccess) {
 async function plexOAuthFlow(expectedUsername, onOk, onErr) {
   let data;
   try {
-    data = await fetch('/api/auth/plex/pin', {
+    const res = await fetch('/api/auth/plex/pin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ forwardUrl: location.origin })
-    }).then((r) => r.json());
+    });
+    const text = await res.text();
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(text || 'Plex PIN endpoint returned invalid response');
+    }
   } catch (e) {
     onErr(e.message);
     return;
@@ -137,7 +143,9 @@ async function plexOAuthFlow(expectedUsername, onOk, onErr) {
   const poll = async () => {
     if (Date.now() - started > 5 * 60 * 1000) { onErr('Timed out — try again.'); return; }
     try {
-      const r = await fetch('/api/auth/plex/check/' + data.id).then((x) => x.json());
+      const res = await fetch('/api/auth/plex/check/' + data.id);
+      const text = await res.text();
+      const r = JSON.parse(text);
       if (r.ok && !r.pending && r.token) {
         if (expectedUsername && r.user.username.toLowerCase() !== expectedUsername.toLowerCase()) {
           onErr(`Signed in to Plex as "${r.user.username}", not "${expectedUsername}". Approve with the right Plex account and try again.`);
@@ -155,7 +163,6 @@ async function plexOAuthFlow(expectedUsername, onOk, onErr) {
   poll();
 }
 
-// ---------- Per-profile re-auth modal ----------
 export function promptReauth(username, { isPlex = false, thumb = '' } = {}) {
   return new Promise((resolve) => {
     let host = document.getElementById('reauth');

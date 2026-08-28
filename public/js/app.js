@@ -99,20 +99,26 @@ function userQuery(extra = '') {
 async function chooseProfile(force = false) {
   let list = [];
   try {
-    const [tUsers, aUsers] = await Promise.all([
-      api('/api/settings/users').catch(() => []),
-      api('/api/auth/users').catch(() => ({ users: [] }))
+    const [pRes, tUsers] = await Promise.all([
+      fetch('/api/auth/profiles').then(async (r) => {
+        const txt = await r.text();
+        try { return JSON.parse(txt); } catch { return { profiles: [] }; }
+      }).catch(() => ({ profiles: [] })),
+      api('/api/settings/users').catch(() => [])
     ]);
-    // Build the merged profile list. NickSeer login accounts (aUsers) take
-    // priority — those carry isAccount/role/plex, which is what decides
-    // whether picking that tile triggers a real sign-in. Tautulli/Plex media
-    // users only fill in a nicer avatar thumb, or appear as a display-only
-    // ("browsing as") profile if there's no matching NickSeer account yet.
+
     const set = new Map();
-    if (aUsers && Array.isArray(aUsers.users)) {
-      aUsers.users.forEach((u) => {
-        if (!u.username) return;
-        set.set(u.username.toLowerCase(), { id: u.username, name: u.username, thumb: u.thumb || '', isAccount: true, role: u.role || 'user', plex: !!u.plex });
+    if (pRes && Array.isArray(pRes.profiles)) {
+      pRes.profiles.forEach((u) => {
+        if (!u.name && !u.id) return;
+        set.set(String(u.name || u.id).toLowerCase(), {
+          id: u.id || u.name,
+          name: u.name || u.id,
+          thumb: u.thumb || '',
+          isAccount: true,
+          role: u.role || 'user',
+          plex: !!u.plex
+        });
       });
     }
     if (Array.isArray(tUsers)) {
