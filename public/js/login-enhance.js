@@ -1,125 +1,110 @@
-// login-enhance.js — upgrades the LOGIN screen (a separate component from the
-// app): adds a cinematic cross-fading backdrop, the calligraphic-N logo, and a
-// "Sign in with Plex" button. Runs pre-auth, so it only uses PUBLIC endpoints
-// (/api/auth/*) and public TMDB images (image.tmdb.org needs no key).
+// login-enhance.js — the initial full-screen sign-in (rendered into #login),
+// PLUS a lightweight per-profile re-authentication modal used by the "Who's
+// watching?" picker in app.js.
+//
+// FIX IN THIS VERSION: promptReauth()'s LOCAL PASSWORD path resolved with a
+// fresh token but never actually called setToken() to persist it — so after
+// switching profiles and entering a password successfully, the browser kept
+// using the PREVIOUS user's token the entire time (e.g. always "NickLn" even
+// after "signing in" as Babis). The Plex OAuth path was already correct
+// (plexOAuthFlow() does call setToken()); only the password path was missing
+// it. That single missing call is why "Request As" never changed.
+const TOKEN_KEY = 'nickseer_token';
+function token() { return localStorage.getItem(TOKEN_KEY) || ''; }
+function setToken(t) { localStorage.setItem(TOKEN_KEY, t); }
+function authHeaders() { const t = token(); return t ? { Authorization: 'Bearer ' + t } : {}; }
 
-// A few stable, well-known TMDB backdrops (public CDN paths). Cross-faded.
-const BACKDROPS = [
-  '/rr7E0NoGKxvbkb89eR1Gwe9jvFO.jpg', // interstellar-ish wide space
-  '/8UlWHLMpgZm9bx6QYh0NFoq67TZ.jpg', // dune
-  '/xg27NrXi7VXCGUr7MG75UqLl6Vg.jpg', // classic cinematic
-  '/wwemzKWzjKYJFfCeiB57q3r4Bcm.jpg', // spider-man
-  '/nDP33LmQwvNjaVWfa32imv7RfBH.jpg', // moody blue
-  '/2h00HrZQGWkStbg5jVYuxUp8jzc.jpg', // batman dark
-  '/9n2tJBplPbgR2ca05hS5CKXwP2c.jpg', // avengers
-  '/vq340s8DxA5Q209FT8PWumWBwer.jpg'  // wide vista
-];
-const IMG_BASE = 'https://image.tmdb.org/t/p/original';
-
-const LOGO_SVG = `
-<svg viewBox="0 0 64 64" width="66" height="66" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="lgTile" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3AA6E0"/><stop offset=".55" stop-color="#1E88C7"/><stop offset="1" stop-color="#0d4e7d"/></linearGradient>
-    <linearGradient id="lgWave" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#bfe8ff"/><stop offset="1" stop-color="#eaf7ff"/></linearGradient>
-    <filter id="lgSh" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="1" stdDeviation="1.1" flood-color="#062038" flood-opacity="0.45"/></filter>
-  </defs>
-  <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#lgTile)"/>
-  <g filter="url(#lgSh)" fill="#ffffff">
-    <path d="M15.5 44.5 C15.2 36 15.2 26 15.6 18.6 C15.7 16.8 18.6 16.6 19.3 18.2 C24.6 26.5 30.5 34.6 36.4 42.1 C36.4 34.4 36.3 25.8 36.7 18.8 C36.8 16.4 41.4 16.3 41.6 18.8 C42 27 42 37.5 41.6 45.4 C41.5 47.4 38.4 47.7 37.4 46 C31.8 38.2 25.9 30.2 20.4 22.7 C20.5 30.2 20.6 38.4 20.3 44.6 C20.2 47.4 15.8 47.6 15.5 44.5 Z"/>
-  </g>
-  <path d="M8 50.5 C 15 46.5, 22 54.5, 30 50.5 C 38 46.5, 45 54.5, 56 49.8" fill="none" stroke="url(#lgWave)" stroke-width="2.4" stroke-linecap="round" opacity=".95"/>
-  <path d="M9 55 C 16 51.5, 22 58.5, 30 55 C 38 51.5, 44 58.5, 55 54.2" fill="none" stroke="url(#lgWave)" stroke-width="1.5" stroke-linecap="round" opacity=".5"/>
-</svg>`;
+export async function getMe() {
+  if (!token()) return null;
+  try { const r = await fetch('/api/auth/me', { headers: authHeaders() }).then((x) => x.json()); return r.ok ? r.user : null; }
+  catch { return null; }
+}
+async function authStatus() {
+  try { return await fetch('/api/auth/status').then((r) => r.json()); }
+  catch { return { enabled: false, plexLogin: false, hasAdmin: false }; }
+}
+async function doLogin(username, password) {
+  try { return await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) }).then((r) => r.json()); }
+  catch (e) { return { ok: false, error: e.message }; }
+}
 
 function injectStyles() {
-  if (document.getElementById('login-enh-css')) return;
+  if (document.getElementById('la-styles')) return;
   const css = `
-  #login .login-bg{position:absolute;inset:0;z-index:0;overflow:hidden;}
-  #login .login-bg .slide{position:absolute;inset:0;background-size:cover;background-position:center;opacity:0;transition:opacity 1.4s ease;}
-  #login .login-bg .slide.on{opacity:1;}
-  #login .login-bg::after{content:"";position:absolute;inset:0;background:
-     radial-gradient(1200px 700px at 50% 30%, rgba(6,10,20,.55), rgba(6,8,14,.9) 70%, #06080e 100%),
-     linear-gradient(180deg, rgba(6,8,14,.6), rgba(6,8,14,.85));}
-  #login .login-card{position:relative;z-index:2;}
-  #login .login-logo svg{width:66px;height:66px;border-radius:16px;box-shadow:0 12px 30px rgba(30,136,199,.5);}
-  #login .login-plex{width:100%;margin-top:12px;padding:13px;font-size:15px;font-weight:800;border:0;border-radius:12px;
-     background:#e5a00d;color:#1b1b1b;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:10px;}
-  #login .login-plex:hover{filter:brightness(1.05);}
-  #login .login-or{color:#9aa0ad;font-size:12px;margin:14px 0 2px;text-align:center;position:relative;}
-  #login .login-btn{background:linear-gradient(135deg,#1E88C7,#0f5687)!important;}
-  .plexmodal{position:fixed;inset:0;z-index:130;display:grid;place-items:center;background:rgba(6,6,10,.85);backdrop-filter:blur(6px);}
-  .plexmodal.hidden{display:none;}
-  .plexmodal .box{width:min(420px,92vw);background:#12121a;border:1px solid rgba(255,255,255,.1);border-radius:18px;padding:26px;text-align:center;box-shadow:0 30px 80px rgba(0,0,0,.6);}
-  .plexmodal h3{margin:0 0 6px;font-size:20px;font-weight:900;color:#fff;} .plexmodal p{color:#9aa0ad;margin:0 0 16px;}
-  .plexmodal .b2{padding:11px 16px;border:0;border-radius:11px;font-weight:800;cursor:pointer;}
-  .plexmodal .go{background:#e5a00d;color:#1b1b1b;} .plexmodal .cx{background:rgba(255,255,255,.1);color:#fff;margin-left:8px;}`;
-  const st = document.createElement('style'); st.id = 'login-enh-css'; st.textContent = css; document.head.appendChild(st);
+  .la-modal{position:fixed;inset:0;z-index:150;display:grid;place-items:center;background:rgba(4,7,13,.88);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);}
+  .la-modal.hidden{display:none;}
+  .la-box{width:min(360px,92vw);}
+  .la-avatar{position:relative;width:64px;height:64px;border-radius:16px;margin:0 auto 16px;display:grid;place-items:center;font-size:22px;font-weight:800;color:#fff;background:linear-gradient(135deg,#2E9BD6,#0f5687);box-shadow:0 8px 22px rgba(30,136,199,.4);}
+  .la-name{text-align:center;font-size:20px;font-weight:900;color:#fff;margin-bottom:4px;letter-spacing:-.01em;}
+  .la-hint{text-align:center;color:#9aa7bd;font-size:13px;margin-bottom:18px;}
+  `;
+  const st = document.createElement('style'); st.id = 'la-styles'; st.textContent = css; document.head.appendChild(st);
 }
 
-let slideTimer = null;
-function addBackground(overlay) {
-  if (overlay.querySelector('.login-bg')) return;
-  const bg = document.createElement('div'); bg.className = 'login-bg';
-  // shuffle a little so it's not the same order every load
-  const order = [...BACKDROPS].sort(() => Math.random() - 0.5);
-  const slides = order.slice(0, 5).map((p, i) => { const s = document.createElement('div'); s.className = 'slide' + (i === 0 ? ' on' : ''); s.style.backgroundImage = `url("${IMG_BASE}${p}")`; return s; });
-  slides.forEach((s) => bg.appendChild(s));
-  overlay.insertBefore(bg, overlay.firstChild);
-  let idx = 0;
-  clearInterval(slideTimer);
-  slideTimer = setInterval(() => { slides[idx].classList.remove('on'); idx = (idx + 1) % slides.length; slides[idx].classList.add('on'); }, 7000);
+// ---------- Full-screen initial login (renders into #login) ----------
+export function renderAegeanLogin(onSuccess) {
+  injectStyles();
+  const host = document.getElementById('login');
+  if (!host) return;
+  host.classList.remove('hidden');
+  const paint = async () => {
+    const st = await authStatus();
+    host.innerHTML = `
+      <div class="login-card">
+        <div class="login-logo"></div>
+        <h1>Sign in to NickSeer</h1>
+        <p>Your family movie &amp; TV hub</p>
+        <div class="login-field"><label>Username</label><input id="laUser" autocomplete="username"></div>
+        <div class="login-field"><label>Password</label><input id="laPass" type="password" autocomplete="current-password"></div>
+        <button class="login-btn" id="laGo">Sign in</button>
+        ${st.plexLogin ? `<div class="login-or">or</div><button class="login-plex" id="laPlex"><svg width="18" height="18" viewBox="0 0 24 24"><path fill="#1b1b1b" d="M4 2h6l6 10-6 10H4l6-10z"/></svg> Sign in with Plex</button>` : ''}
+        <div class="login-err" id="laErr"></div>
+      </div>`;
+    const err = host.querySelector('#laErr');
+    const goLocal = async () => {
+      const username = host.querySelector('#laUser').value.trim();
+      const password = host.querySelector('#laPass').value;
+      err.textContent = '';
+      const r = await doLogin(username, password);
+      if (r.ok) { setToken(r.token); finish(r.user); }
+      else err.textContent = r.error || 'Sign in failed';
+    };
+    host.querySelector('#laGo').addEventListener('click', goLocal);
+    host.querySelector('#laPass').addEventListener('keydown', (e) => { if (e.key === 'Enter') goLocal(); });
+    host.querySelector('#laUser').addEventListener('keydown', (e) => { if (e.key === 'Enter') host.querySelector('#laPass').focus(); });
+    const plexBtn = host.querySelector('#laPlex');
+    if (plexBtn) plexBtn.addEventListener('click', () => plexOAuthFlow(null, (user) => finish(user), (msg) => { err.textContent = msg; }));
+    setTimeout(() => host.querySelector('#laUser')?.focus(), 80);
+  };
+  const finish = (user) => { host.classList.add('hidden'); onSuccess && onSuccess(user); };
+  paint();
 }
 
-function swapLogo(card) {
-  const logo = card.querySelector('.login-logo');
-  if (logo) { logo.innerHTML = LOGO_SVG; return; }
-  // If the login markup used a different container, insert before the H1.
-  const h1 = card.querySelector('h1');
-  if (h1 && !card.querySelector('.login-logo')) { const d = document.createElement('div'); d.className = 'login-logo'; d.innerHTML = LOGO_SVG; card.insertBefore(d, h1); }
-}
-
-async function addPlexButton(card) {
-  if (card.querySelector('.login-plex')) return;
-  // Only show it if the server has Plex login enabled.
-  let enabled = false;
-  try { const st = await fetch('/api/auth/status').then((r) => r.json()); enabled = !!st.plexLogin; } catch { /* default hidden */ }
-  if (!enabled) return;
-  const signBtn = card.querySelector('.login-btn') || card.querySelector('button');
-  const or = document.createElement('div'); or.className = 'login-or'; or.textContent = 'or';
-  const plex = document.createElement('button');
-  plex.type = 'button'; plex.className = 'login-plex';
-  plex.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24"><path fill="#1b1b1b" d="M4 2h6l6 10-6 10H4l6-10z"/></svg> Sign in with Plex`;
-  plex.addEventListener('click', startPlexLogin);
-  // place after the Sign in button (and its container)
-  const anchor = signBtn ? signBtn.parentElement : card;
-  (signBtn && signBtn.parentElement === card ? card : anchor).appendChild(or);
-  (signBtn && signBtn.parentElement === card ? card : anchor).appendChild(plex);
-}
-
-async function startPlexLogin() {
-  let modal = document.getElementById('plexModal');
-  if (!modal) { modal = document.createElement('div'); modal.id = 'plexModal'; modal.className = 'plexmodal'; document.body.appendChild(modal); }
-  modal.classList.remove('hidden');
-  modal.innerHTML = `<div class="box"><h3>Sign in with Plex</h3><p>Requesting a secure PIN…</p></div>`;
+// ---------- Plex OAuth (shared by full login + per-profile re-auth) ----------
+// If `expectedUsername` is given, the returned Plex identity MUST match it —
+// otherwise we refuse the switch rather than silently signing in as whoever
+// happened to approve the Plex popup.
+async function plexOAuthFlow(expectedUsername, onOk, onErr) {
   let data;
   try { data = await fetch('/api/auth/plex/pin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ forwardUrl: location.origin }) }).then((r) => r.json()); }
-  catch (e) { modal.querySelector('.box').innerHTML = `<h3>Failed</h3><p>${e.message}</p>`; return; }
-  if (!data.ok) { modal.querySelector('.box').innerHTML = `<h3>Failed</h3><p>${data.error || 'could not create PIN'}</p><button class="b2 cx" onclick="document.getElementById('plexModal').classList.add('hidden')">Close</button>`; return; }
-  const win = window.open(data.authUrl, '_blank', 'width=800,height=720');
-  modal.querySelector('.box').innerHTML = `<h3>Approve in Plex</h3><p>A Plex window opened — sign in and approve. This finishes automatically.</p><button class="b2 go" id="pxOpen">Re-open Plex</button><button class="b2 cx" id="pxCancel">Cancel</button>`;
-  modal.querySelector('#pxOpen').onclick = () => window.open(data.authUrl, '_blank', 'width=800,height=720');
-  let stopped = false; modal.querySelector('#pxCancel').onclick = () => { stopped = true; modal.classList.add('hidden'); };
+  catch (e) { onErr(e.message); return; }
+  if (!data.ok) { onErr(data.error || 'Plex PIN failed'); return; }
+  const win = window.open(data.authUrl, '_blank', 'width=820,height=740');
   const started = Date.now();
   const poll = async () => {
-    if (stopped) return;
-    if (Date.now() - started > 5 * 60 * 1000) { modal.querySelector('.box').innerHTML = `<h3>Timed out</h3><p>Please try again.</p>`; return; }
+    if (Date.now() - started > 5 * 60 * 1000) { onErr('Timed out — try again.'); return; }
     try {
       const r = await fetch('/api/auth/plex/check/' + data.id).then((x) => x.json());
       if (r.ok && !r.pending && r.token) {
-        localStorage.setItem('nickseer_token', r.token); localStorage.removeItem('nickseer_profile');
+        if (expectedUsername && r.user.username.toLowerCase() !== expectedUsername.toLowerCase()) {
+          onErr(`Signed in to Plex as "${r.user.username}", not "${expectedUsername}". Approve with the right Plex account and try again.`);
+          try { if (win) win.close(); } catch { /* ignore */ }
+          return;
+        }
+        setToken(r.token);
         try { if (win) win.close(); } catch { /* ignore */ }
-        modal.querySelector('.box').innerHTML = `<h3>✓ Signed in</h3><p>Welcome, ${r.user.username}. Reloading…</p>`;
-        setTimeout(() => location.reload(), 800); return;
+        onOk(r.user);
+        return;
       }
     } catch { /* keep polling */ }
     setTimeout(poll, 2000);
@@ -127,18 +112,57 @@ async function startPlexLogin() {
   poll();
 }
 
-function enhance() {
-  const overlay = document.getElementById('login');
-  if (!overlay || overlay.classList.contains('hidden')) { clearInterval(slideTimer); slideTimer = null; return; }
-  const card = overlay.querySelector('.login-card');
-  if (!card) return;                      // login not rendered yet
+// ---------- Per-profile re-auth modal ----------
+// Resolves { ok:true, user, token } on success, { ok:false, cancelled:true }
+// if the user backs out, or { ok:false, error } on a failed attempt.
+export function promptReauth(username, { isPlex = false, thumb = '' } = {}) {
   injectStyles();
-  addBackground(overlay);
-  swapLogo(card);
-  addPlexButton(card);
+  return new Promise((resolve) => {
+    let host = document.getElementById('reauth');
+    if (!host) { host = document.createElement('div'); host.id = 'reauth'; host.className = 'la-modal'; document.body.appendChild(host); }
+    host.classList.remove('hidden');
+    const initials = (username || '?').slice(0, 2).toUpperCase();
+    host.innerHTML = `
+      <div class="login-card la-box">
+        <div class="la-avatar" style="${thumb ? `background-image:url('${thumb}');background-size:cover;` : ''}">${thumb ? '' : initials}</div>
+        <div class="la-name">${username}</div>
+        <div class="la-hint">${isPlex ? 'Sign in with this Plex account to continue as ' + username + '.' : 'Enter the password for ' + username + '.'}</div>
+        ${isPlex
+    ? `<button class="login-plex" id="raPlex"><svg width="18" height="18" viewBox="0 0 24 24"><path fill="#1b1b1b" d="M4 2h6l6 10-6 10H4l6-10z"/></svg> Sign in with Plex</button>`
+    : `<div class="login-field"><label>Password</label><input id="raPass" type="password" autocomplete="current-password"></div><button class="login-btn" id="raGo">Continue</button>`}
+        <div class="login-err" id="raErr"></div>
+        <button class="btn btn-ghost" id="raCancel" data-nav style="width:100%;margin-top:10px;">Cancel</button>
+      </div>`;
+    const err = host.querySelector('#raErr');
+    const close = (result) => { host.classList.add('hidden'); resolve(result); };
+    host.querySelector('#raCancel').addEventListener('click', () => close({ ok: false, cancelled: true }));
+    if (isPlex) {
+      host.querySelector('#raPlex').addEventListener('click', () => {
+        plexOAuthFlow(username, (user) => close({ ok: true, user, token: token() }), (msg) => { err.textContent = msg; });
+      });
+    } else {
+      const goLocal = async () => {
+        const password = host.querySelector('#raPass').value;
+        err.textContent = '';
+        const r = await doLogin(username, password);
+        if (r.ok) {
+          // *** THE FIX ***
+          // This call was MISSING before — the promise resolved with a fresh
+          // token, but nothing ever persisted it, so the browser kept using
+          // whichever token was already stored (e.g. the admin's). Persist it
+          // FIRST, then resolve, so by the time app.js reloads the page the
+          // correct account's token is already the one in localStorage.
+          setToken(r.token);
+          close({ ok: true, user: r.user, token: r.token });
+        } else {
+          err.textContent = r.error || 'Sign in failed';
+        }
+      };
+      host.querySelector('#raGo').addEventListener('click', goLocal);
+      host.querySelector('#raPass').addEventListener('keydown', (e) => { if (e.key === 'Enter') goLocal(); });
+      setTimeout(() => host.querySelector('#raPass')?.focus(), 60);
+    }
+  });
 }
 
-const obs = new MutationObserver(() => enhance());
-obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
-setTimeout(enhance, 300);
-setTimeout(enhance, 1000);
+export default { renderAegeanLogin, promptReauth, getMe };

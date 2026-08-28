@@ -65,10 +65,21 @@ async function build() {
 
 function act(kind) {
   document.querySelector('.pm-pop')?.classList.add('hidden');
-  if (kind === 'switch') { localStorage.removeItem('nickseer_profile'); location.reload(); }
-  else if (kind === 'settings') { document.getElementById('settingsBtn')?.click(); }
-  else if (kind === 'logout') { localStorage.removeItem('nickseer_token'); localStorage.removeItem('nickseer_profile'); location.reload(); }
-  else if (kind === 'plex') { startPlexLogin(); }
+  if (kind === 'switch') {
+    localStorage.removeItem('nickseer_profile');
+    document.dispatchEvent(new CustomEvent('auth:choose-profile'));
+  }
+  else if (kind === 'settings') {
+    document.getElementById('settingsBtn')?.click();
+  }
+  else if (kind === 'logout') {
+    localStorage.removeItem('nickseer_token');
+    localStorage.removeItem('nickseer_profile');
+    document.dispatchEvent(new CustomEvent('auth:logout'));
+  }
+  else if (kind === 'plex') {
+    startPlexLogin();
+  }
 }
 
 // ---- Plex OAuth tester ----

@@ -47,4 +47,24 @@
 .seg button.active { background: var(--accent) !important; }
 .settings-tab.active { border-bottom-color: var(--accent) !important; }
 
+/* Aegean profile dialog & focus enhancements */
+.profile-overlay {
+  background: radial-gradient(ellipse at 50% 25%, rgba(30,136,199,0.28) 0%, rgba(6,18,32,0.96) 55%, #030a14 100%) !important;
+}
+.profile-face {
+  /* Provide Aegean gradient but do not use !important so inline avatar images can override it */
+  background: linear-gradient(135deg, var(--aegean-1), var(--aegean-2));
+}
+.profile-tile:hover .profile-face, .profile-tile.nav-focus .profile-face {
+  border-color: #3AA6E0 !important;
+  box-shadow: 0 14px 35px rgba(30,136,199,.6) !important;
+}
+
+/* TV Focus ring: high-contrast Aegean glow */
+.nav-focus {
+  outline: 3px solid #3AA6E0 !important;
+  outline-offset: 3px !important;
+  box-shadow: 0 0 24px rgba(58, 166, 224, 0.75), 0 8px 30px rgba(0,0,0,0.6) !important;
+}
+
 /* Toasts / status "bad" stay red — that's an error colour, not a brand accent. */

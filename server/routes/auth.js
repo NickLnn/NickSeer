@@ -9,7 +9,7 @@ const router = express.Router();
 
 router.get('/status', (req, res) => {
   const c = load();
-  res.json({ enabled: auth.isEnabled(), hasAdmin: auth.hasAnyAdmin(), plexLogin: !!c.plexAuth?.enabled, approvals: !!c.auth?.approvals });
+  res.json({ enabled: auth.isEnabled(), hasAdmin: auth.hasAnyAdmin(), plexLogin: c.plexAuth?.enabled !== false, approvals: !!c.auth?.approvals });
 });
 
 router.post('/login', (req, res) => {

@@ -31,6 +31,7 @@ class Router {
   post(p, h) { this._add('POST', p, h); }
   put(p, h) { this._add('PUT', p, h); }
   delete(p, h) { this._add('DELETE', p, h); }
+  patch(p, h) { this._add('PATCH', p, h); }
   use(a, b) {
     if (typeof a === 'function') this.stack.push({ method: 'USE', routePath: '/', handler: a });
     else this.stack.push({ method: 'MOUNT', routePath: a, handler: b });
@@ -89,11 +90,22 @@ function decorate(req, res) {
   };
 }
 
-function readJson(req) {
+function readJson(req, maxBytes = 1048576) {
   return new Promise((resolve) => {
     let data = '';
-    req.on('data', (c) => (data += c));
-    req.on('end', () => { if (!data) return resolve({}); try { resolve(JSON.parse(data)); } catch { resolve({}); } });
+    let size = 0;
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > maxBytes) {
+        req.destroy();
+        return resolve({});
+      }
+      data += c;
+    });
+    req.on('end', () => {
+      if (!data) return resolve({});
+      try { resolve(JSON.parse(data)); } catch { resolve({}); }
+    });
     req.on('error', () => resolve({}));
   });
 }

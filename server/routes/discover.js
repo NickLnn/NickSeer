@@ -44,13 +44,18 @@ async function buildCuratedRows() {
 // batch IMDb ratings (TMDB id → imdb_id → OMDb)
 async function imdbIdFor(media, id) { return cached(`imdbid:${media}:${id}`, 30 * TTL_DAY, async () => { try { const ext = await tmdb.externalIds(media, id); return ext?.imdb_id || null; } catch { return null; } }, false); }
 router.post('/imdb-ratings', async (req, res) => {
-  const cfg = load();
-  if (!cfg.omdb?.apiKey) return res.status(200).json({ error: 'omdb-not-configured', ratings: {} });
   const items = (req.body && req.body.items) || [];
   const out = {};
-  await Promise.all(items.slice(0, 40).map(async (it) => {
-    const media = it.media === 'tv' || it.media === 'show' ? 'tv' : 'movie'; const id = it.id; if (!id) return;
-    try { const imdbId = await imdbIdFor(media, id); if (!imdbId) return; const o = await omdb.byImdbId(imdbId); if (o?.rating) out[String(id)] = o.rating; } catch { /* skip */ }
+  await Promise.all(items.slice(0, 50).map(async (it) => {
+    const media = it.media === 'tv' || it.media === 'show' ? 'tv' : 'movie';
+    const id = it.id;
+    if (!id) return;
+    try {
+      const imdbId = await imdbIdFor(media, id);
+      if (!imdbId) return;
+      const o = await omdb.byImdbId(imdbId, media);
+      if (o?.rating) out[String(id)] = o.rating;
+    } catch { /* skip */ }
   }));
   res.json({ ratings: out });
 });
@@ -143,7 +148,7 @@ router.get('/:media/:id', async (req, res) => {
     const trailer = yt.find((v) => v.type === 'Trailer' && v.official) || yt.find((v) => v.type === 'Trailer') || yt[0];
     const imdbId = d.external_ids?.imdb_id || null;
     let imdb = null;
-    if (imdbId && load().omdb?.apiKey) { try { const o = await omdb.byImdbId(imdbId); if (o?.rating) imdb = { rating: o.rating, votes: o.votes }; } catch { /* optional */ } }
+    if (imdbId) { try { const o = await omdb.byImdbId(imdbId, media); if (o?.rating) imdb = { rating: o.rating, votes: o.votes }; } catch { /* optional */ } }
     const owned = map[String(d.id)] || null;
     let seriesStatus = null, episodePercent = null, episodesOwned = null, episodesTotal = null;
     if (media === 'tv') { const raw = (d.status || '').toLowerCase(); if (raw.includes('end') || raw.includes('cancel')) seriesStatus = 'ended'; else if (raw.includes('return') || raw.includes('production') || raw.includes('airing')) seriesStatus = 'continuing'; episodesTotal = d.number_of_episodes || null; if (owned && episodesTotal) { episodesOwned = owned.leafCount || 0; episodePercent = Math.max(0, Math.min(100, Math.round((episodesOwned / episodesTotal) * 100))); } }

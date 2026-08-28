@@ -4,6 +4,8 @@ import path from 'path';
 
 const CONFIG_DIR = process.env.CONFIG_DIR || '/config';
 const CONFIG_FILE = path.join(CONFIG_DIR, 'settings.json');
+const BACKUP_FILE = path.join(CONFIG_DIR, 'settings.bak.json');
+const TMP_FILE = path.join(CONFIG_DIR, 'settings.json.tmp');
 
 const DEFAULTS = {
   configured: false,
@@ -43,21 +45,52 @@ function deepMerge(base, override) {
 }
 
 let cache = null;
+let lastMtime = 0;
 
-export function load() {
-  if (cache) return cache;
+export function load(forceReload = false) {
   try {
     if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    if (fs.existsSync(CONFIG_FILE)) cache = deepMerge(DEFAULTS, JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')));
-    else { cache = deepMerge(DEFAULTS, {}); save(cache); }
-  } catch (e) { console.error('[config] failed to load:', e.message); cache = deepMerge(DEFAULTS, {}); }
+    if (fs.existsSync(CONFIG_FILE)) {
+      const stats = fs.statSync(CONFIG_FILE);
+      if (!forceReload && cache && stats.mtimeMs === lastMtime) return cache;
+      const raw = fs.readFileSync(CONFIG_FILE, 'utf-8');
+      if (raw && raw.trim()) {
+        cache = deepMerge(DEFAULTS, JSON.parse(raw));
+        lastMtime = stats.mtimeMs;
+      }
+    } else {
+      cache = deepMerge(DEFAULTS, {});
+      save(cache);
+    }
+  } catch (e) {
+    console.error('[config] failed to load:', e.message);
+    if (!cache) cache = deepMerge(DEFAULTS, {});
+  }
   return cache;
 }
 
 export function save(next) {
   cache = deepMerge(DEFAULTS, next);
-  if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(cache, null, 2));
+  try {
+    if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    
+    // Create backup of current config before overwrite
+    if (fs.existsSync(CONFIG_FILE)) {
+      try { fs.copyFileSync(CONFIG_FILE, BACKUP_FILE); } catch (e) { /* non-fatal */ }
+    }
+
+    // Atomic write via temp file
+    const jsonStr = JSON.stringify(cache, null, 2);
+    fs.writeFileSync(TMP_FILE, jsonStr, 'utf-8');
+    fs.renameSync(TMP_FILE, CONFIG_FILE);
+    
+    const stats = fs.statSync(CONFIG_FILE);
+    lastMtime = stats.mtimeMs;
+  } catch (e) {
+    console.error('[config] atomic save failed:', e.message);
+    // Fallback direct write
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(cache, null, 2), 'utf-8');
+  }
   return cache;
 }
 
@@ -67,9 +100,7 @@ export function update(partial) { return save(deepMerge(load(), partial)); }
 export function setRequests(arr) {
   const c = load();
   c.requests = arr;
-  cache = c;
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(c, null, 2));
-  return c;
+  return save(c);
 }
 
 export function redacted() {

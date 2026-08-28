@@ -54,6 +54,23 @@ router.post('/:id/decline', (req, res) => {
   res.json({ ok: true });
 });
 
+
+// Edit a pending request's settings (admin only).
+router.patch('/:id', (req, res) => {
+  const u = userFrom(req);
+  if (auth.isEnabled() && (!u || u.role !== 'admin')) return res.status(200).json({ ok: false, error: 'Admin only' });
+  const all = load().requests || [];
+  const rq = all.find((r) => r.id === req.params.id);
+  if (!rq) return res.status(200).json({ ok: false, error: 'not found' });
+  if (rq.status !== 'pending') return res.status(200).json({ ok: false, error: 'Only pending requests can be edited' });
+  const { qualityProfileId, rootFolder, tags, newTags } = req.body || {};
+  if (qualityProfileId !== undefined) rq.qualityProfileId = qualityProfileId;
+  if (rootFolder !== undefined) rq.rootFolder = rootFolder;
+  if (tags !== undefined) rq.tags = tags;
+  if (newTags !== undefined) rq.newTags = newTags;
+  setRequests(all);
+  res.json({ ok: true, request: rq });
+});
 router.post('/clear', (req, res) => {
   const u = userFrom(req);
   if (auth.isEnabled() && (!u || u.role !== 'admin')) return res.status(200).json({ ok: false, error: 'Admin only' });

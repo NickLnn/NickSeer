@@ -36,3 +36,5 @@ Thumbs.db
 
 # Docker build artifacts
 *.log
+
+.agents/

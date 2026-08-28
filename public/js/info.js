@@ -62,7 +62,18 @@ function stripDownloads() {
   const grid = document.querySelector('.status-grid'); if (!grid || grid.id === 'infoGrid') return;
   [...grid.children].forEach((card) => { const nm = card.querySelector('.status-name'); if (nm && /^(Radarr|Sonarr)$/i.test(nm.textContent.trim())) card.remove(); });
 }
+async function toggleTab() {
+  const [st, me] = await Promise.all([
+    fetch('/api/auth/status').then((r) => r.json()).catch(() => ({})),
+    (localStorage.getItem('nickseer_token') ? fetch('/api/auth/me', { headers: authHeaders() }).then((r) => r.json()).catch(() => ({})) : Promise.resolve({}))
+  ]);
+  const isAdmin = me?.user?.role === 'admin';
+  document.querySelectorAll('.nav-link[data-view="info"], .drawer-item[data-view="info"]').forEach((b) => {
+    b.style.display = isAdmin ? '' : 'none';
+  });
+}
 function init() {
+  toggleTab();
   const btn = document.querySelector('.nav-link[data-view="info"]');
   if (btn) btn.addEventListener('click', () => setTimeout(render, 0));
   const obs = new MutationObserver(() => { if (isInfoActive() && !document.getElementById('infoView')) render(); stripDownloads(); });

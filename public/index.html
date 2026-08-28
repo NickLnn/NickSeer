@@ -2,9 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
   <meta name="theme-color" content="#0a0a0f" />
   <title>NickSeer</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="apple-touch-icon" href="/favicon.svg" />
   <link rel="preconnect" href="https://image.tmdb.org" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -17,9 +19,12 @@
   <div id="ambient" class="ambient"></div>
 
   <header class="topbar" id="topbar">
-    <div class="brand" data-nav>
-      <span class="brand-mark" aria-hidden="true"></span>
-      <span class="brand-text">NickSeer</span>
+    <div class="topbar-left">
+      <button id="mobileMenuBtn" class="icon-btn mobile-menu-btn" title="Menu" aria-label="Menu">☰</button>
+      <div class="brand" data-nav>
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-text">NickSeer</span>
+      </div>
     </div>
     <nav class="nav-links">
       <button class="nav-link active" data-nav data-view="home">Home</button>
@@ -31,17 +36,50 @@
       <button class="nav-link" data-nav data-view="boxoffice">Box Office</button>
       <button class="nav-link" data-nav data-view="coming">Coming Soon</button>
       <button class="nav-link" data-nav data-view="live">Live Streaming</button>
-      <button class="nav-link" data-nav data-view="approvals" style="display:none">Approvals</button>
       <button class="nav-link" data-nav data-view="status">Downloads</button>
       <button class="nav-link" data-nav data-view="info">Info</button>
+      <button class="nav-link" data-nav data-view="requests" style="display:none">Requests</button>
     </nav>
     <div class="topbar-right">
-      <div class="search-box"><input id="search" type="search" placeholder="Search…" data-nav autocomplete="off" /></div>
+      <div class="search-box"><input id="search" type="search" placeholder="Search movies, TV, actors…" data-nav autocomplete="off" /></div>
       <button id="refreshBtn" class="icon-btn" data-nav title="Refresh now" aria-label="Refresh">⟳</button>
       <button id="profileBtn" class="profile-btn" data-nav title="Profile"><span id="profileInitial">N</span></button>
       <button id="settingsBtn" class="icon-btn" data-nav title="Settings" aria-label="Settings">⚙</button>
     </div>
   </header>
+
+  <!-- Seerr-style Mobile Navigation Drawer -->
+  <div id="drawerOverlay" class="drawer-overlay hidden">
+    <div class="drawer-backdrop" id="drawerBackdrop"></div>
+    <aside class="drawer-panel" id="drawerPanel">
+      <div class="drawer-head">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span class="brand-text">NickSeer</span>
+        </div>
+        <button id="drawerCloseBtn" class="drawer-close" aria-label="Close menu">✕</button>
+      </div>
+      <div class="drawer-body">
+        <div class="drawer-section-title">Discover</div>
+        <button class="drawer-item active" data-view="home"><span class="d-ic">🏠</span> Home</button>
+        <button class="drawer-item" data-view="movies"><span class="d-ic">🎬</span> Movies</button>
+        <button class="drawer-item" data-view="shows"><span class="d-ic">📺</span> TV Shows</button>
+        <button class="drawer-item" data-view="ai"><span class="d-ic">✨</span> AI Recommendations</button>
+        <button class="drawer-item" data-view="streaming"><span class="d-ic">🍿</span> Streaming Services</button>
+        <button class="drawer-item" data-view="new"><span class="d-ic">🆕</span> New Releases</button>
+        <button class="drawer-item" data-view="boxoffice"><span class="d-ic">🎟️</span> Box Office Top 10</button>
+        <button class="drawer-item" data-view="coming"><span class="d-ic">⏳</span> Coming Soon</button>
+        <button class="drawer-item" data-view="live"><span class="d-ic">🔴</span> Live Streaming</button>
+
+        <div class="drawer-section-title">Manage</div>
+        <button class="drawer-item" data-view="requests" id="drawerRequestsBtn"><span class="d-ic">📋</span> Requests</button>
+        <button class="drawer-item" data-view="status"><span class="d-ic">📥</span> Downloads & Health</button>
+        <button class="drawer-item" data-view="info"><span class="d-ic">ℹ️</span> System Info</button>
+        <button class="drawer-item" id="drawerSettingsBtn"><span class="d-ic">⚙️</span> Settings</button>
+        <button class="drawer-item" id="drawerProfileBtn"><span class="d-ic">👥</span> Switch Profile</button>
+      </div>
+    </aside>
+  </div>
 
   <main id="app" class="app"></main>
 
@@ -53,6 +91,30 @@
   <div id="settings" class="settings-overlay hidden"></div>
   <div id="login" class="login-overlay hidden"></div>
   <div id="toasts" class="toasts"></div>
+
+  <!-- Mobile Bottom Navigation (Overseerr / Seerr Style) -->
+  <nav class="bottom-nav" id="bottomNav">
+    <button class="bottom-nav-item active" data-nav data-view="home">
+      <span class="bnav-icon">🏠</span>
+      <span class="bnav-label">Home</span>
+    </button>
+    <button class="bottom-nav-item" data-nav data-view="movies">
+      <span class="bnav-icon">🎬</span>
+      <span class="bnav-label">Movies</span>
+    </button>
+    <button class="bottom-nav-item" data-nav data-view="shows">
+      <span class="bnav-icon">📺</span>
+      <span class="bnav-label">TV</span>
+    </button>
+    <button class="bottom-nav-item" data-nav data-view="requests" id="bnavRequests">
+      <span class="bnav-icon">📋</span>
+      <span class="bnav-label">Requests</span>
+    </button>
+    <button class="bottom-nav-item" data-nav id="bottomMenuBtn">
+      <span class="bnav-icon">☰</span>
+      <span class="bnav-label">More</span>
+    </button>
+  </nav>
 
   <script type="module" src="/js/nav.js"></script>
   <script type="module" src="/js/settings.js"></script>

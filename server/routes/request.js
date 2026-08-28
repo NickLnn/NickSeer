@@ -1,5 +1,13 @@
-// Requesting. If "admin approves" is ON and the requester isn't an admin, the
-// request is queued as PENDING (Approvals tab). Otherwise it's added directly.
+// Requesting. The "admin approves" gate respects the auth.approvals TOGGLE
+// (Settings → Users), not just whether login is required. If you're still
+// seeing "will be approved automatically" for non-admins, this file MUST be
+// in place AND the toggle (see auth-toggles.js) must be switched ON.
+//
+// Rule (mustQueue):
+//   • Login not required at all           → always direct-add
+//   • Login required, approvals toggle OFF → direct-add for everyone
+//   • Login required, approvals toggle ON, requester is NOT admin → queue as pending
+//   • Requester IS admin → always direct-add
 import express from '../mini.js';
 import arr from '../services/arr.js';
 import tautulli from '../services/tautulli.js';
@@ -13,11 +21,19 @@ function kindFor(media) { return media === 'tv' || media === 'show' ? 'sonarr' :
 function isAlreadyExists(msg) { const m = String(msg || '').toLowerCase(); return m.includes('has already been added') || m.includes('movieexistsvalidator') || m.includes('seriesexistsvalidator'); }
 function userFrom(req) { const tok = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, ''); return auth.verifyToken(tok); }
 
+function mustQueue(c, isAdmin) {
+  if (!auth.isEnabled()) return false;
+  if (isAdmin) return false;
+  return !!c.auth?.approvals;
+}
+
 router.get('/options', async (req, res) => {
   const media = req.query.media || 'movie';
   const kind = kindFor(media);
   const c = load();
-  const out = { kind, media, autoApprove: !c.auth?.approvals, servers: [{ id: kind, name: `${cap(kind)} (Default)` }], profiles: [], rootFolders: [], tags: [], requestAs: null };
+  const u = userFrom(req);
+  const isAdmin = u && u.role === 'admin';
+  const out = { kind, media, autoApprove: !mustQueue(c, isAdmin), servers: [{ id: kind, name: `${cap(kind)} (Default)` }], profiles: [], rootFolders: [], tags: [], requestAs: null };
   const s = c.services[kind];
   if (s?.url && s?.apikey) {
     const [profiles, roots, tags] = await Promise.all([arr.qualityProfiles(kind).catch(() => []), arr.rootFolders(kind).catch(() => []), arr.tags(kind).catch(() => [])]);
@@ -27,7 +43,6 @@ router.get('/options', async (req, res) => {
     out.defaultProfileId = s.qualityProfileId ?? out.profiles[0]?.id ?? null;
     out.defaultRootFolder = s.rootFolder || out.rootFolders[0]?.path || '';
   } else out.error = `${cap(kind)} is not configured — add it in Settings first.`;
-  const u = userFrom(req);
   if (u) out.requestAs = { name: u.username, email: '' };
   else { try { const users = await tautulli.users(); const owner = (users || []).find((x) => x.is_admin) || (users || [])[0]; if (owner) out.requestAs = { name: owner.friendly_name || owner.username, email: owner.email || '' }; } catch { /* optional */ } }
   res.json(out);
@@ -39,11 +54,9 @@ router.post('/', async (req, res) => {
   const kind = kindFor(media);
   const c = load();
   const u = userFrom(req);
-  const approvalsOn = !!c.auth?.approvals;
   const isAdmin = u && u.role === 'admin';
 
-  // Queue as pending when approvals are on and requester isn't an admin.
-  if (approvalsOn && !isAdmin) {
+  if (mustQueue(c, isAdmin)) {
     const all = load().requests || [];
     if (all.find((r) => r.status === 'pending' && String(r.tmdbId) === String(tmdbId) && r.media === media)) {
       return res.json({ ok: true, code: 'pending', already: true });
@@ -53,7 +66,6 @@ router.post('/', async (req, res) => {
     return res.json({ ok: true, code: 'pending' });
   }
 
-  // Direct add.
   try {
     const tagIds = [...tags];
     for (const label of newTags) { if (!label) continue; const id = await arr.ensureTag(kind, label); if (!tagIds.includes(id)) tagIds.push(id); }

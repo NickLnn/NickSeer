@@ -2,10 +2,19 @@
 // detail ownership badges (in-library ✓, series status, episode-% ring),
 // hero slideshow, all discovery views, box office (worldwide total),
 // downloads, search, and the Overseerr-style Request modal.
+//
+// CHANGES IN THIS PATCH:
+//  1) "Who's watching?" profiles are now REAL accounts. Switching to a
+//     profile that isn't the currently-authenticated user triggers an actual
+//     sign-in (password, or Plex OAuth for Plex-provisioned accounts) via
+//     login-enhance.js's promptReauth(), so the Bearer token — and therefore
+//     who a request/approval is attributed to — is genuinely correct.
+//  2) Search no longer steals focus onto the first result while you're still
+//     typing/paused (was causing an unwanted "jump" on desktop AND mobile).
+//     Focus into results now only happens on an intentional ArrowDown/Enter.
 import { toast, el, api, stars, authToken } from './util.js';
 import { openSettings } from './settings.js';
 import { setFocus } from './nav.js';
-
 const app = document.getElementById('app');
 const ambient = document.getElementById('ambient');
 let currentView = 'home';
@@ -15,11 +24,11 @@ const mediaToggle = { new: 'movie', coming: 'movie' };
 
 // ---------- brand logos ----------
 const BRANDS = {
-  netflix:   { cls: 'bg-netflix', mark: 'N' },
-  disney:    { cls: 'bg-disney', mark: 'D+' },
-  amazon:    { cls: 'bg-amazon', mark: 'a' },
-  max:       { cls: 'bg-max', mark: 'M' },
-  apple:     { cls: 'bg-apple', mark: '' },   // Apple logo glyph
+  netflix: { cls: 'bg-netflix', mark: 'N' },
+  disney: { cls: 'bg-disney', mark: 'D+' },
+  amazon: { cls: 'bg-amazon', mark: 'a' },
+  max: { cls: 'bg-max', mark: 'M' },
+  apple: { cls: 'bg-apple', mark: '' },   // Apple logo glyph
   paramount: { cls: 'bg-paramount', mark: 'P+' }
 };
 function brandBadge(key) {
@@ -28,51 +37,48 @@ function brandBadge(key) {
   return el('span', { class: 'brand-badge ' + b.cls, title: key }, b.mark);
 }
 
-// ---------- login ----------
+// ---------- login & auth gating ----------
+import { renderAegeanLogin, promptReauth, getMe } from './login-enhance.js';
 async function ensureAuth() {
-  const st = await fetch('/api/auth/status').then((r) => r.json()).catch(() => ({ enabled: false }));
-  if (!st.enabled) return true;                       // login off
   const tok = authToken();
   if (tok) {
     const me = await fetch('/api/auth/me', { headers: { Authorization: 'Bearer ' + tok } }).then((r) => r.json()).catch(() => ({ ok: false }));
-    if (me.ok) return true;
+    if (me && me.ok) return true;
   }
   await showLogin();
   return false;
 }
 function showLogin() {
   return new Promise((resolve) => {
-    const host = document.getElementById('login');
-    host.classList.remove('hidden');
-    host.innerHTML = `
-      <div class="login-card">
-        <div class="login-logo"><svg viewBox="0 0 64 64"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6d5ef0"/><stop offset="1" stop-color="#e50914"/></linearGradient></defs><rect width="64" height="64" rx="15" fill="url(#lg)"/><path d="M20 46V18h6l12 16V18h6v28h-6L26 30v16z" fill="#fff"/></svg></div>
-        <h1>NickSeer</h1><p>Sign in to continue</p>
-        <div class="login-field"><label>Username</label><input id="lg-user" autocomplete="username" /></div>
-        <div class="login-field"><label>Password</label><input id="lg-pass" type="password" autocomplete="current-password" /></div>
-        <button class="login-btn" id="lg-go">Sign in</button>
-        <div class="login-err" id="lg-err"></div>
-      </div>`;
-    const go = async () => {
-      const username = host.querySelector('#lg-user').value.trim();
-      const password = host.querySelector('#lg-pass').value;
-      const err = host.querySelector('#lg-err');
-      err.textContent = '';
-      const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) }).then((x) => x.json());
-      if (r.ok) { localStorage.setItem('nickseer_token', r.token); host.classList.add('hidden'); resolve(true); }
-      else { err.textContent = r.error || 'Sign in failed'; }
-    };
-    host.querySelector('#lg-go').addEventListener('click', go);
-    host.querySelector('#lg-pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
-    setTimeout(() => host.querySelector('#lg-user').focus(), 60);
+    // Hide all overlays that might be open
+    document.getElementById('profileOverlay')?.classList.add('hidden');
+    document.getElementById('modal')?.classList.add('hidden');
+    document.getElementById('requestModal')?.classList.add('hidden');
+    document.getElementById('settings')?.classList.add('hidden');
+    renderAegeanLogin(async (user) => {
+      resolve(true);
+      await afterAuth();
+    });
   });
 }
-document.addEventListener('auth:required', () => { localStorage.removeItem('nickseer_token'); showLogin().then(() => showView(currentView)); });
+document.addEventListener('auth:required', () => {
+  localStorage.removeItem('nickseer_token');
+  localStorage.removeItem('nickseer_profile');
+  showLogin();
+});
+document.addEventListener('auth:logout', () => {
+  localStorage.removeItem('nickseer_token');
+  localStorage.removeItem('nickseer_profile');
+  showLogin();
+});
+document.addEventListener('auth:choose-profile', () => {
+  chooseProfile(true);
+});
 
-// ---------- profiles (multi-user) ----------
+// ---------- profiles (multi-user, now backed by REAL accounts) ----------
 const PROFILE_KEY = 'nickseer_profile';
 function getProfile() { try { return JSON.parse(localStorage.getItem(PROFILE_KEY) || 'null'); } catch { return null; } }
-function setProfile(p) { if (p) localStorage.setItem(PROFILE_KEY, JSON.stringify(p)); else localStorage.removeItem(PROFILE_KEY); paintProfileBadge(); }
+function setProfile(p) { if (p) localStorage.setItem(PROFILE_KEY, JSON.stringify(p)); else localStorage.removeItem(PROFILE_KEY); paintProfileBadge(); updateRoleVisibility(); }
 function paintProfileBadge() {
   const p = getProfile();
   const ini = document.getElementById('profileInitial');
@@ -85,36 +91,128 @@ function userQuery(extra = '') {
   return parts.length ? '?' + parts.join('&') : '';
 }
 async function chooseProfile(force = false) {
-  const users = await api('/api/settings/users').catch(() => []);
-  const list = Array.isArray(users) ? users : [];
-  if (!force && list.length <= 1) { if (list[0]) setProfile(list[0]); return; }
+  let list = [];
+  try {
+    const [tUsers, aUsers] = await Promise.all([
+      api('/api/settings/users').catch(() => []),
+      api('/api/auth/users').catch(() => ({ users: [] }))
+    ]);
+    // Build the merged profile list. NickSeer login accounts (aUsers) take
+    // priority — those carry isAccount/role/plex, which is what decides
+    // whether picking that tile triggers a real sign-in. Tautulli/Plex media
+    // users only fill in a nicer avatar thumb, or appear as a display-only
+    // ("browsing as") profile if there's no matching NickSeer account yet.
+    const set = new Map();
+    if (aUsers && Array.isArray(aUsers.users)) {
+      aUsers.users.forEach((u) => {
+        if (!u.username) return;
+        set.set(u.username.toLowerCase(), { id: u.username, name: u.username, thumb: u.thumb || '', isAccount: true, role: u.role || 'user', plex: !!u.plex });
+      });
+    }
+    if (Array.isArray(tUsers)) {
+      tUsers.forEach((u) => {
+        if (!u.id && !u.name) return;
+        const key = String(u.name || u.id).toLowerCase();
+        const existing = set.get(key);
+        if (existing) { if (u.thumb && !existing.thumb) existing.thumb = u.thumb; }
+        else set.set(key, { id: u.id || '', name: u.name || 'User', thumb: u.thumb || '', isAccount: false, role: 'user', plex: false });
+      });
+    }
+    list = [...set.values()];
+  } catch {
+    list = [];
+  }
   let host = document.getElementById('profileOverlay');
   if (!host) { host = document.createElement('div'); host.id = 'profileOverlay'; host.className = 'profile-overlay'; document.body.appendChild(host); }
   host.classList.remove('hidden');
-  const avatar = (u) => { const initials = (u.name || '?').split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase(); return `<button class="profile-tile" data-nav data-id="${u.id}" data-name="${encodeURIComponent(u.name || 'User')}"><span class="profile-face">${initials}</span><span class="profile-name">${u.name || 'User'}</span></button>`; };
-  host.innerHTML = `<div class="profile-inner"><h1 class="profile-h1">Who's watching?</h1><div class="profile-grid">${list.map(avatar).join('')}<button class="profile-tile" data-nav data-id="" data-name="Everyone"><span class="profile-face" style="background:linear-gradient(135deg,#3a3a4a,#555)">👥</span><span class="profile-name">Everyone</span></button></div>${force ? '<button class="btn btn-ghost" id="profileClose" data-nav style="margin-top:8px">Cancel</button>' : ''}</div>`;
-  host.querySelectorAll('.profile-tile').forEach((t) => t.addEventListener('click', () => { const id = t.dataset.id; const name = decodeURIComponent(t.dataset.name || 'User'); setProfile(id ? { id, name } : { id: '', name: 'Everyone' }); host.classList.add('hidden'); rowsCache = null; showView('home'); toast(`Profile: ${name}`, 'ok'); }));
-  const close = host.querySelector('#profileClose'); if (close) close.addEventListener('click', () => host.classList.add('hidden'));
-  setTimeout(() => { const f = host.querySelector('.profile-tile'); if (f) setFocus(f); }, 60);
+  const avatar = (u) => {
+    const initials = (u.name || '?').split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+    const style = u.thumb ? `background-image:url('${u.thumb}');background-size:cover;` : '';
+    const badge = (u.isAccount && u.role === 'admin') ? '<span class="profile-badge">Admin</span>' : '';
+    return `<button class="profile-tile" data-nav data-id="${u.id}" data-name="${encodeURIComponent(u.name || 'User')}" data-account="${u.isAccount ? '1' : '0'}" data-plex="${u.plex ? '1' : '0'}" data-thumb="${encodeURIComponent(u.thumb || '')}"><span class="profile-face" style="${style}">${u.thumb ? '' : initials}${badge}</span><span class="profile-name">${u.name || 'User'}</span></button>`;
+  };
+  host.innerHTML = `
+    <div class="profile-inner">
+      <div class="profile-logo-mark"><span class="brand-mark" style="margin:0 auto 12px;width:48px;height:48px;"></span></div>
+      <h1 class="profile-h1">Who's watching?</h1>
+      <div class="profile-grid">
+        ${list.map(avatar).join('')}
+        <button class="profile-tile" data-nav data-id="" data-name="Everyone">
+          <span class="profile-face" style="background:linear-gradient(135deg,#1E88C7,#0f5687);border-color:rgba(58,166,224,0.4)">👥</span>
+          <span class="profile-name">Everyone</span>
+        </button>
+      </div>
+      ${force ? '<button class="btn btn-ghost" id="profileClose" data-nav style="margin-top:20px;padding:10px 24px;">Close</button>' : ''}
+    </div>`;
+  host.querySelectorAll('.profile-tile').forEach((t) => t.addEventListener('click', async () => {
+    const id = t.dataset.id;
+    const name = decodeURIComponent(t.dataset.name || 'User');
+    const isAccount = t.dataset.account === '1';
+    const isPlex = t.dataset.plex === '1';
+    const thumb = decodeURIComponent(t.dataset.thumb || '');
+
+    if (!id) {
+      // "Everyone" — cosmetic only; no auth change. Requests made while this
+      // is selected are attributed to whoever is actually signed in.
+      setProfile({ id: '', name: 'Everyone' });
+      host.classList.add('hidden'); rowsCache = null; showView('home');
+      toast('Browsing as Everyone', 'ok');
+      return;
+    }
+
+    if (!isAccount) {
+      // Media-only profile (no NickSeer login account yet) — cosmetic switch.
+      setProfile({ id, name });
+      host.classList.add('hidden'); rowsCache = null; showView('home');
+      toast(`Browsing as ${name} — requests use your signed-in account`, 'ok');
+      return;
+    }
+
+    // Real NickSeer account: only re-authenticate if we aren't already them.
+    const me = await getMe();
+    if (me && me.username.toLowerCase() === name.toLowerCase()) {
+      setProfile({ id, name });
+      host.classList.add('hidden'); rowsCache = null; showView('home');
+      toast(`Welcome, ${name}`, 'ok');
+      return;
+    }
+
+    const result = await promptReauth(name, { isPlex, thumb });
+    if (result && result.ok) {
+      setProfile({ id: result.user.username, name: result.user.username });
+      toast(`Signed in as ${result.user.username}`, 'ok');
+      // A full reload guarantees every module re-reads the fresh Bearer token
+      // (matches the same proven pattern used by the top-bar profile menu).
+      location.reload();
+    } else if (result && !result.cancelled) {
+      toast(result.error || 'Sign-in failed', 'bad');
+    }
+  }));
+  const close = host.querySelector('#profileClose');
+  if (close) close.addEventListener('click', () => host.classList.add('hidden'));
+  setTimeout(() => { const f = host.querySelector('.profile-tile'); if (f) setFocus(f); }, 80);
   injectStyles();
 }
 function injectStyles() {
   if (document.getElementById('profile-styles')) return;
   const css = `
-  .profile-overlay{position:fixed;inset:0;z-index:76;display:grid;place-items:center;background:rgba(6,6,10,.96);backdrop-filter:blur(6px);}
+  .profile-overlay{position:fixed;inset:0;z-index:110;display:grid;place-items:center;background:radial-gradient(ellipse at 50% 25%, rgba(30,136,199,0.25) 0%, rgba(6,18,32,0.95) 50%, #030a14 100%);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);}
   .profile-overlay.hidden{display:none;}
-  .profile-inner{text-align:center;} .profile-h1{font-size:40px;font-weight:800;margin:0 0 34px;color:#eaeaf0;}
-  .profile-grid{display:flex;gap:26px;flex-wrap:wrap;justify-content:center;max-width:880px;}
-  .profile-tile{background:transparent;border:0;display:flex;flex-direction:column;align-items:center;gap:12px;cursor:pointer;}
-  .profile-face{width:120px;height:120px;border-radius:14px;display:grid;place-items:center;font-size:40px;font-weight:800;color:#fff;background:linear-gradient(135deg,#6d5ef0,#a78bfa);border:3px solid transparent;transition:.18s;}
-  .profile-tile:hover .profile-face,.profile-tile.nav-focus .profile-face{border-color:#fff;transform:scale(1.06);}
-  .profile-name{color:#9aa0ad;font-size:17px;font-weight:600;} .profile-tile:hover .profile-name,.profile-tile.nav-focus .profile-name{color:#fff;}
+  .profile-inner{text-align:center;padding:20px;max-width:92vw;}
+  .profile-h1{font-size:38px;font-weight:900;margin:0 0 32px;color:#f0f7ff;letter-spacing:-.02em;text-shadow:0 2px 10px rgba(0,0,0,.5);}
+  .profile-grid{display:flex;gap:24px;flex-wrap:wrap;justify-content:center;max-width:880px;margin:0 auto;}
+  .profile-tile{background:transparent;border:0;display:flex;flex-direction:column;align-items:center;gap:12px;cursor:pointer;outline:none;}
+  .profile-face{position:relative;width:115px;height:115px;border-radius:18px;display:grid;place-items:center;font-size:38px;font-weight:800;color:#fff;background:linear-gradient(135deg,#2E9BD6,#0f5687);border:3px solid transparent;box-shadow:0 10px 25px rgba(0,0,0,.45);transition:transform .2s,border-color .2s,box-shadow .2s;}
+  .profile-tile:hover .profile-face,.profile-tile.nav-focus .profile-face{border-color:#3AA6E0;transform:scale(1.08);box-shadow:0 14px 35px rgba(30,136,199,.55);}
+  .profile-name{color:#a2c4e2;font-size:16px;font-weight:700;transition:color .2s;}
+  .profile-tile:hover .profile-name,.profile-tile.nav-focus .profile-name{color:#ffffff;}
+  .profile-badge{position:absolute;bottom:-6px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#f5c518,#e5a00d);color:#1b1b1b;font-size:9px;font-weight:900;padding:2px 8px;border-radius:999px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.4);letter-spacing:.02em;}
   .req-result{padding:54px 32px;text-align:center;}
-  .req-check{width:84px;height:84px;border-radius:50%;margin:0 auto 20px;display:grid;place-items:center;font-size:44px;background:radial-gradient(circle at 50% 40%,#35d07f,#1f9d5f);color:#fff;box-shadow:0 10px 30px rgba(53,208,127,.45);animation:pop .35s cubic-bezier(.2,.8,.2,1.4);}
-  .req-check.exists{background:radial-gradient(circle at 50% 40%,#6d5ef0,#4c3fd0);}
+  .req-check{width:84px;height:84px;border-radius:50%;margin:0 auto 20px;display:grid;place-items:center;font-size:44px;background:radial-gradient(circle at 50% 40%,#3AA6E0,#0f5687);color:#fff;box-shadow:0 10px 30px rgba(30,136,199,.45);animation:pop .35s cubic-bezier(.2,.8,.2,1.4);}
+  .req-check.exists{background:radial-gradient(circle at 50% 40%,#1E88C7,#08385f);}
   @keyframes pop{0%{transform:scale(.4);opacity:0;}100%{transform:scale(1);opacity:1;}}
   .req-result h3{font-size:24px;font-weight:900;margin:0 0 6px;color:#fff;} .req-result p{color:#9aa0ad;margin:0 0 22px;}
-  @media(max-width:640px){.profile-face{width:92px;height:92px;font-size:30px;}.profile-h1{font-size:30px;}}`;
+  @media(max-width:640px){.profile-face{width:90px;height:90px;font-size:28px;}.profile-h1{font-size:28px;}}`;
   const st = document.createElement('style'); st.id = 'profile-styles'; st.textContent = css; document.head.appendChild(st);
 }
 
@@ -122,7 +220,7 @@ function injectStyles() {
 async function boot() {
   injectStyles();
   const ok = await ensureAuth();
-  if (!ok) return; // login shown; resolves then re-enters
+  if (!ok) return; // login shown; resolves then calls afterAuth
   await afterAuth();
 }
 async function afterAuth() {
@@ -130,11 +228,16 @@ async function afterAuth() {
   if (status && status._401) return;
   if (!status.configured) { openSettings(true); return; }
   paintProfileBadge();
-  if (!getProfile()) await chooseProfile(false);
-  showView('home');
+  await updateRoleVisibility();
+  if (!getProfile()) {
+    await chooseProfile(false);
+  } else {
+    showView('home');
+  }
 }
 document.addEventListener('settings:saved', () => { rowsCache = null; showView(currentView); });
 document.getElementById('profileBtn')?.addEventListener('click', () => chooseProfile(true));
+document.getElementById('bottomProfileBtn')?.addEventListener('click', () => chooseProfile(true));
 document.getElementById('refreshBtn')?.addEventListener('click', async () => {
   const btn = document.getElementById('refreshBtn'); btn.classList.add('spinning');
   try { await api('/api/settings/refresh', { method: 'POST' }); } catch { /* ignore */ }
@@ -142,15 +245,95 @@ document.getElementById('refreshBtn')?.addEventListener('click', async () => {
   setTimeout(() => btn.classList.remove('spinning'), 600);
 });
 
-document.querySelectorAll('.nav-link[data-view]').forEach((b) => b.addEventListener('click', () => {
-  document.querySelectorAll('.nav-link').forEach((n) => n.classList.remove('active')); b.classList.add('active'); showView(b.dataset.view);
-}));
 const search = document.getElementById('search');
 let searchTimer;
 search.addEventListener('input', () => { clearTimeout(searchTimer); const q = search.value.trim(); if (!q) { showView(currentView); return; } searchTimer = setTimeout(() => runSearch(q), 350); });
+// Intentional "jump into results" — ONLY on ArrowDown/Enter, so typing (and
+// the debounce-triggered re-render after a pause) never steals focus away
+// from the input on its own. This is what was causing the "auto-scrolls to a
+// movie while I'm still typing/paused" bug on both desktop and mobile.
+search.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown' || e.key === 'Enter') {
+    const first = app.querySelector('.card');
+    if (first) { e.preventDefault(); setFocus(first); }
+  }
+});
+// Topbar, Bottom nav, and Mobile Drawer sync
+function setupNavigation() {
+  const drawer = document.getElementById('drawerOverlay');
+  const openDrawer = () => drawer?.classList.remove('hidden');
+  const closeDrawer = () => drawer?.classList.add('hidden');
 
+  document.getElementById('mobileMenuBtn')?.addEventListener('click', openDrawer);
+  document.getElementById('bottomMenuBtn')?.addEventListener('click', openDrawer);
+  document.getElementById('drawerCloseBtn')?.addEventListener('click', closeDrawer);
+  document.getElementById('drawerBackdrop')?.addEventListener('click', closeDrawer);
+
+  document.getElementById('drawerSettingsBtn')?.addEventListener('click', () => {
+    closeDrawer();
+    document.getElementById('settingsBtn')?.click();
+  });
+  document.getElementById('drawerProfileBtn')?.addEventListener('click', () => {
+    closeDrawer();
+    chooseProfile(true);
+  });
+
+  document.querySelectorAll('.nav-link[data-view], .bottom-nav-item[data-view], .drawer-item[data-view]').forEach((b) => {
+    b.addEventListener('click', () => {
+      const view = b.dataset.view;
+      if (view) {
+        closeDrawer();
+        document.querySelectorAll('.nav-link, .bottom-nav-item, .drawer-item').forEach((n) => {
+          if (n.dataset.view === view) n.classList.add('active');
+          else if (n.dataset.view) n.classList.remove('active');
+        });
+        showView(view);
+      }
+    });
+  });
+}
+setupNavigation();
+export async function updateRoleVisibility() {
+  const t = authToken();
+  let isAdmin = false;
+  if (t) {
+    try {
+      const me = await fetch('/api/auth/me', { headers: { Authorization: 'Bearer ' + t } }).then((r) => r.json());
+      isAdmin = me?.user?.role === 'admin';
+    } catch { isAdmin = false; }
+  }
+  
+  // Admin-only navigation views
+  const adminViews = ['info', 'live', 'requests'];
+  document.querySelectorAll('.nav-link, .drawer-item, .bottom-nav-item').forEach((el) => {
+    const v = el.dataset.view;
+    if (adminViews.includes(v)) {
+      el.style.display = isAdmin ? '' : 'none';
+    }
+  });
+
+  const drawerSettings = document.getElementById('drawerSettingsBtn');
+  if (drawerSettings) drawerSettings.style.display = isAdmin ? '' : 'none';
+  const topSettings = document.getElementById('settingsBtn');
+  if (topSettings) topSettings.style.display = isAdmin ? '' : 'none';
+
+  return isAdmin;
+}
 async function showView(view, force = false) {
+  if (['info', 'live'].includes(view)) {
+    const isAdmin = await updateRoleVisibility();
+    if (!isAdmin) {
+      toast('Admin only', 'bad');
+      showView('home');
+      return;
+    }
+  }
   currentView = view; stopSlideshow(); app.innerHTML = skeleton();
+  // Sync active states on top and bottom navigation bars
+  document.querySelectorAll('.nav-link, .bottom-nav-item').forEach((n) => {
+    if (n.dataset.view === view) n.classList.add('active');
+    else if (n.dataset.view) n.classList.remove('active');
+  });
   try {
     if (view === 'home') await renderHome(force);
     else if (view === 'movies') await renderCategory('movie', force);
@@ -162,9 +345,7 @@ async function showView(view, force = false) {
     else if (view === 'status') await renderStatus();
   } catch (e) { app.innerHTML = ''; app.appendChild(emptyState('Something went wrong', e.message)); }
 }
-
 async function getRows(force) { if (rowsCache && !force) return rowsCache; rowsCache = await api('/api/discover/rows' + (force ? '?refresh=1' : '')); return rowsCache; }
-
 async function renderHome(force) {
   const [home, curated] = await Promise.all([api('/api/discover/home' + userQuery(force ? 'refresh=1' : '')), getRows(force)]);
   app.innerHTML = '';
@@ -177,7 +358,6 @@ async function renderHome(force) {
   for (const row of (curated.rows || [])) app.appendChild(rowEl(row.title, row.items, false, isTop(row.title), row.brand));
   focusFirstCard();
 }
-
 async function renderCategory(media, force) {
   const [trend, imdb] = await Promise.all([api('/api/discover/trending' + (force ? '?refresh=1' : '')), api(`/api/discover/imdb-top?media=${media}` + (force ? '&refresh=1' : ''))]);
   app.innerHTML = '';
@@ -188,7 +368,6 @@ async function renderCategory(media, force) {
   app.appendChild(rowEl(media === 'movie' ? 'IMDb Top 250 · Movies' : 'IMDb Top 250 · Series', (imdb.items || []).map((c) => normalize(c, media)), false, true));
   focusFirstCard();
 }
-
 async function renderStreaming(force) {
   const curated = await getRows(force);
   app.innerHTML = '';
@@ -198,7 +377,6 @@ async function renderStreaming(force) {
   for (const row of streamRows) app.appendChild(rowEl(row.title, row.items, false, true, row.brand));
   focusFirstCard();
 }
-
 async function renderNew(force) {
   const media = mediaToggle.new;
   const data = await api(`/api/discover/new?media=${media}` + (force ? '&refresh=1' : ''));
@@ -210,7 +388,6 @@ async function renderNew(force) {
   for (const row of rows) app.appendChild(rowEl(row.title, row.items, false, false, row.brand));
   focusFirstCard();
 }
-
 async function renderBoxOffice(force) {
   const data = await api('/api/discover/boxoffice' + (force ? '?refresh=1' : ''));
   app.innerHTML = '';
@@ -240,7 +417,6 @@ function boxOfficeCard(it, rank) {
   c.appendChild(el('div', { class: 'card-info' }, [el('div', { class: 'card-name' }, it.title), el('div', { class: 'card-year' }, [it.weeks ? `wk ${it.weeks} · ` : '', totalLine].join(''))]));
   return c;
 }
-
 async function renderComing(force) {
   const media = mediaToggle.coming;
   const data = await api(`/api/discover/anticipated?media=${media}` + (force ? '&refresh=1' : ''));
@@ -252,19 +428,21 @@ async function renderComing(force) {
   for (const row of rows) app.appendChild(rowEl(row.title, row.items, false, false, row.brand));
   focusFirstCard();
 }
-
 async function runSearch(q) {
   stopSlideshow(); app.innerHTML = skeleton();
   const results = await api('/api/discover/search?q=' + encodeURIComponent(q));
   app.innerHTML = '';
-  if (!Array.isArray(results) || !results.length) { app.appendChild(emptyState('No results', 'Try another title.')); return; }
-  app.appendChild(el('div', { class: 'row-head' }, [el('div', { class: 'row-title' }, `Results for “${q}”`)]));
-  const grid = el('div', { class: 'row-scroll', style: 'flex-wrap:wrap' });
+  if (!Array.isArray(results) || !results.length) { app.appendChild(emptyState('No results for "' + q + '"', 'Try another title or keyword.')); return; }
+  const wrap = el('div', { class: 'search-results-wrap' });
+  wrap.appendChild(el('div', { class: 'search-results-head' }, [
+    el('div', { class: 'row-title' }, `Results for "${q}"`),
+    el('div', { class: 'row-sub' }, `${results.length} titles found`)
+  ]));
+  const grid = el('div', { class: 'search-results-grid' });
   results.forEach((it) => grid.appendChild(card(it)));
-  app.appendChild(grid);
-  focusFirstCard();
+  wrap.appendChild(grid);
+  app.appendChild(wrap);
 }
-
 async function renderStatus() {
   const s = await api('/api/status');
   app.innerHTML = '';
@@ -297,7 +475,6 @@ async function renderStatus() {
   if (!grid.children.length) { app.appendChild(emptyState('No services connected', 'Add SABnzbd, Radarr, Sonarr or Gluetun in Settings.', true)); return; }
   app.appendChild(grid); focusFirstCard();
 }
-
 function tabHeader(title, media, onSwitch) {
   const head = el('div', { class: 'row-head', style: 'align-items:center' });
   head.appendChild(el('div', { class: 'row-title' }, title));
@@ -306,7 +483,6 @@ function tabHeader(title, media, onSwitch) {
   seg.appendChild(mk('Movies', 'movie')); seg.appendChild(mk('TV', 'tv'));
   head.appendChild(seg); return head;
 }
-
 function heroSlideshow(items) {
   stopSlideshow();
   const node = el('section', { class: 'hero' });
@@ -334,7 +510,6 @@ function heroSlideshow(items) {
   paint(); restart(); return node;
 }
 function stopSlideshow() { if (slideTimer) { clearInterval(slideTimer); slideTimer = null; } }
-
 // Row with optional streaming brand logo before the title.
 function rowEl(title, items, isPicked, ranked, brand) {
   const wrap = el('section', { class: 'row' });
@@ -352,7 +527,6 @@ function rowEl(title, items, isPicked, ranked, brand) {
   return wrap;
 }
 function rowSub(text) { return el('div', { class: 'row-sub', style: 'padding:0 40px 4px' }, text); }
-
 function card(item, rank) {
   const c = el('div', { class: 'card', tabindex: '0', 'data-nav': '' });
   c.addEventListener('click', () => openDetail(item));
@@ -374,7 +548,6 @@ function personCard(m) {
 function downloadRow(name, percent, timeLeft) {
   return el('div', { class: 'dl-item' }, [el('div', { class: 'dl-row' }, [el('span', { class: 'dl-name' }, name || 'item'), el('span', { class: 'dl-meta' }, (percent != null ? percent + '%' : '') + (timeLeft ? ' · ' + timeLeft : ''))]), el('div', { class: 'bar' }, [el('i', { style: `width:${percent || 0}%` })])]);
 }
-
 // ---------- detail modal (with ownership badges) ----------
 async function openDetail(item) {
   const modal = document.getElementById('modal');
@@ -383,7 +556,7 @@ async function openDetail(item) {
   cardEl.innerHTML = '<div style="padding:60px;text-align:center;color:var(--muted)">Loading…</div>';
   document.getElementById('modalBackdrop').onclick = closeModal;
   const media = item.media === 'show' ? 'tv' : item.media || 'movie';
-  if (!item.id) { cardEl.innerHTML = `<div style="padding:40px">No TMDB match for “${item.title}”.</div>`; return; }
+  if (!item.id) { cardEl.innerHTML = `<div style="padding:40px">No TMDB match for "${item.title}".</div>`; return; }
   const d = await api(`/api/discover/${media}/${item.id}`);
   if (d.error) { cardEl.innerHTML = `<div style="padding:40px">${d.error}</div>`; return; }
   setAmbient(d.backdrop);
@@ -392,13 +565,11 @@ async function openDetail(item) {
   cardEl.appendChild(el('button', { class: 'modal-close', 'data-nav': '', onclick: closeModal }, '✕'));
   if (d.trailerKey) cardEl.appendChild(el('div', { class: 'modal-video', html: `<iframe src="https://www.youtube.com/embed/${d.trailerKey}?autoplay=0&rel=0&modestbranding=1" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>` }));
   else { const mh = el('div', { class: 'modal-hero' }); if (d.backdrop) mh.style.backgroundImage = `url(${d.backdrop})`; cardEl.appendChild(mh); }
-
   // Title row + ownership badges (✓ in library, series status).
   const ownBadges = el('div', { class: 'own-badges' });
   if (d.inLibrary) ownBadges.appendChild(el('span', { class: 'own-pill in-lib', title: 'In your Plex library' }, [el('span', { class: 'own-tick' }, '✓'), 'In library']));
   if (media === 'tv' && d.seriesStatus) ownBadges.appendChild(el('span', { class: 'own-pill ' + (d.seriesStatus === 'ended' ? 'ended' : 'cont') }, d.seriesStatus === 'ended' ? '■ Ended' : '● Continuing'));
   const titleRow = el('div', { class: 'title-row' }, [el('h2', { class: 'modal-title', style: 'margin:0' }, d.title), ownBadges]);
-
   const meta = el('div', { class: 'modal-meta' }, [
     d.year ? el('span', {}, d.year) : null,
     d.runtime ? el('span', {}, d.runtime + ' min') : null,
@@ -416,13 +587,11 @@ async function openDetail(item) {
     ]);
     meta.appendChild(ring);
   }
-
   const actions = el('div', { class: 'modal-actions' }, [
     el('button', { class: 'btn btn-accent', 'data-nav': '', onclick: () => openRequestModal({ ...item, media, title: d.title, backdrop: d.backdrop }) }, '＋  Request'),
     d.trailerKey ? el('a', { class: 'btn btn-ghost', 'data-nav': '', href: `https://www.youtube.com/watch?v=${d.trailerKey}`, target: '_blank' }, '▶  YouTube') : null,
     d.imdbUrl ? el('a', { class: 'btn btn-imdb', 'data-nav': '', href: d.imdbUrl, target: '_blank', rel: 'noopener' }, 'IMDb ↗') : null
   ]);
-
   const body = el('div', { class: 'modal-body' }, [
     titleRow,
     d.tagline ? el('div', { class: 'modal-tagline' }, d.tagline) : null,
@@ -431,7 +600,6 @@ async function openDetail(item) {
     el('p', { class: 'modal-overview' }, d.overview || 'No description available.'),
     actions
   ]);
-
   if (d.cast && d.cast.length) {
     body.appendChild(el('div', { class: 'section-label' }, 'Cast · tap an actor'));
     const cast = el('div', { class: 'cast-row' });
@@ -442,7 +610,6 @@ async function openDetail(item) {
   if (more.length) { body.appendChild(el('div', { class: 'section-label' }, 'More like this')); const row = el('div', { class: 'cast-row' }); more.forEach((m) => row.appendChild(card(normalize(m, m.media)))); body.appendChild(row); }
   cardEl.appendChild(body); cardEl.scrollTop = 0;
 }
-
 async function openPerson(person) {
   const modal = document.getElementById('modal'); const cardEl = document.getElementById('modalCard');
   modal.classList.remove('hidden');
@@ -456,12 +623,11 @@ async function openPerson(person) {
   const body = el('div', { class: 'modal-body', style: 'padding-top:0' });
   body.appendChild(el('div', { class: 'section-label' }, `In your library · ${p.name.split(' ')[0]}`));
   if (p.inLibrary && p.inLibrary.length) { const row = el('div', { class: 'cast-row' }); p.inLibrary.forEach((m) => row.appendChild(personCard(m))); body.appendChild(row); }
-  else body.appendChild(el('div', { class: 'row-sub', style: 'margin-bottom:6px' }, 'Nothing yet — request something from “Known for” below.'));
+  else body.appendChild(el('div', { class: 'row-sub', style: 'margin-bottom:6px' }, 'Nothing yet — request something from "Known for" below.'));
   if (p.knownFor && p.knownFor.length) { body.appendChild(el('div', { class: 'section-label' }, 'Known for (acting) · tap ＋ to send to your systems')); const row = el('div', { class: 'cast-row' }); p.knownFor.forEach((m) => row.appendChild(personCard(m))); body.appendChild(row); }
   if (p.crewKnownFor && p.crewKnownFor.length) { body.appendChild(el('div', { class: 'section-label' }, 'Directed · written · produced · tap ＋ to request')); const row = el('div', { class: 'cast-row' }); p.crewKnownFor.forEach((m) => row.appendChild(personCard(m))); body.appendChild(row); }
   cardEl.appendChild(body); cardEl.scrollTop = 0;
 }
-
 function closeModal() { document.getElementById('modalCard').innerHTML = ''; document.getElementById('modal').classList.add('hidden'); }
 document.addEventListener('nav:back', () => {
   const rq = document.getElementById('requestModal');
@@ -469,7 +635,6 @@ document.addEventListener('nav:back', () => {
   const modal = document.getElementById('modal');
   if (!modal.classList.contains('hidden')) closeModal();
 });
-
 async function openRequestModal(item) {
   const media = item.media === 'show' ? 'tv' : item.media || 'movie';
   if (!item.id) { toast('No TMDB match to request', 'bad'); return; }
@@ -489,7 +654,7 @@ async function openRequestModal(item) {
   cardEl.innerHTML = `
     ${requestHeader(media, item)}
     <div class="req-body">
-      <div class="req-note ok">ⓘ &nbsp;This request will be approved automatically.</div>
+      <div class="req-note ${opts.autoApprove ? 'ok' : ''}" style="${opts.autoApprove ? '' : 'background:rgba(245,197,24,.12);color:#f5c518;'}">ⓘ &nbsp;${opts.autoApprove ? 'This request will be approved automatically.' : 'This request will be submitted for admin approval.'}</div>
       <div class="req-adv">Advanced</div>
       <div class="req-grid">
         <div class="req-field"><label>Destination Server</label><select id="reqServer">${opts.servers.map((s) => `<option value="${s.id}">${s.name}</option>`).join('')}</select></div>
@@ -511,23 +676,31 @@ async function openRequestModal(item) {
   cardEl.querySelector('#reqCancel').onclick = closeRequestModal;
   cardEl.querySelector('#reqSubmit').onclick = async () => {
     const btn = cardEl.querySelector('#reqSubmit'); btn.disabled = true; btn.textContent = 'Requesting…';
-    const payload = { media, tmdbId: item.id, qualityProfileId: cardEl.querySelector('#reqProfile')?.value || undefined, rootFolder: cardEl.querySelector('#reqRoot')?.value || undefined, tags: [...selected], newTags };
+    const payload = { media, tmdbId: item.id, title: item.title || '', poster: item.poster || '', qualityProfileId: cardEl.querySelector('#reqProfile')?.value || undefined, rootFolder: cardEl.querySelector('#reqRoot')?.value || undefined, tags: [...selected], newTags };
     const r = await api('/api/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    if (r.ok) showRequestResult(cardEl, item, { kind: r.kind, state: 'added' });
+    if (r.ok && r.code === 'pending') showRequestResult(cardEl, item, { kind: r.kind, state: 'pending' });
+    else if (r.ok) showRequestResult(cardEl, item, { kind: r.kind, state: 'added' });
     else if (r.code === 'exists') showRequestResult(cardEl, item, { kind: r.kind, state: 'exists' });
     else { toast('Request failed: ' + (r.error || 'unknown'), 'bad'); btn.disabled = false; btn.textContent = 'Request'; }
   };
   setTimeout(() => { const f = cardEl.querySelector('#reqProfile'); if (f) setFocus(f); }, 80);
 }
 function showRequestResult(cardEl, item, { kind, state }) {
-  const added = state === 'added'; const svc = kind === 'sonarr' ? 'Sonarr' : 'Radarr';
-  cardEl.innerHTML = `${requestHeader(item.media === 'show' ? 'tv' : item.media || 'movie', item)}<div class="req-result"><div class="req-check ${added ? '' : 'exists'}">✓</div><h3>${added ? 'Added to ' + svc : 'Already in your library'}</h3><p>${added ? `“${item.title}” is on its way — downloading soon.` : `“${item.title}” is already in ${svc}.`}</p><button class="btn btn-accent" id="reqDone" data-nav>Done</button></div>`;
+  const svc = kind === 'sonarr' ? 'Sonarr' : 'Radarr';
+  let icon, heading, desc, cls;
+  if (state === 'pending') {
+    icon = '⏳'; heading = 'Request Submitted'; desc = `"${item.title}" has been submitted for admin approval.`; cls = '';
+  } else if (state === 'added') {
+    icon = '✓'; heading = 'Added to ' + svc; desc = `"${item.title}" is on its way — downloading soon.`; cls = '';
+  } else {
+    icon = '✓'; heading = 'Already in your library'; desc = `"${item.title}" is already in ${svc}.`; cls = 'exists';
+  }
+  cardEl.innerHTML = `${requestHeader(item.media === 'show' ? 'tv' : item.media || 'movie', item)}<div class="req-result"><div class="req-check ${cls}">${icon}</div><h3>${heading}</h3><p>${desc}</p><button class="btn btn-accent" id="reqDone" data-nav>Done</button></div>`;
   const done = cardEl.querySelector('#reqDone'); done.onclick = closeRequestModal; setTimeout(() => setFocus(done), 60);
   setTimeout(() => { const h = document.getElementById('requestModal'); if (h && !h.classList.contains('hidden')) closeRequestModal(); }, 2600);
 }
 function requestHeader(media, item) { return `<div class="req-hero" style="background-image:var(--req-bg)"></div><div class="req-head"><div class="req-kicker">Request ${media === 'tv' ? 'Series' : 'Movie'}</div><div class="req-name">${item.title || ''}</div></div>`; }
 function closeRequestModal() { const host = document.getElementById('requestModal'); if (host) host.classList.add('hidden'); }
-
 function isTop(title) { return /· Top 10$/.test(title || '') || /Top 250/.test(title || ''); }
 function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 function normalize(c, media) {
@@ -537,5 +710,4 @@ function setAmbient(url) { if (!url) return; ambient.style.backgroundImage = `ur
 function skeleton() { const cards = Array.from({ length: 7 }).map(() => '<div class="skeleton"></div>').join(''); return `<div style="height:40vh"></div><div class="row-head"><div class="row-title">Loading…</div></div><div class="skeleton-row">${cards}</div><div class="skeleton-row">${cards}</div>`; }
 function emptyState(title, sub, showSettings) { return el('div', { class: 'empty' }, [el('h3', {}, title), el('p', {}, sub || ''), showSettings ? el('button', { class: 'btn btn-accent', 'data-nav': '', style: 'margin-top:16px', onclick: () => openSettings(false) }, 'Open Settings') : null]); }
 function focusFirstCard() { setTimeout(() => { const first = document.querySelector('.hero-actions .btn, .card, .status-card, .seg button'); if (first) setFocus(first); }, 120); }
-
 boot();

@@ -1,6 +1,11 @@
 // NickSeer server — HARDENED boot. Every optional router is imported defensively
 // so a missing file can NEVER crash the server (which was showing a blank app
 // via a cached page while the container restart-looped).
+//
+// CHANGE IN THIS PATCH: mounts the new (additive) auth-roles.js router, which
+// adds POST /api/auth/users/role so an admin can change an existing user's
+// role later (Admin ⇄ Requester) — needed for "profiles are users, I decide
+// who is requester / who is admin".
 import express from './mini.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -20,13 +25,14 @@ async function tryRouter(rel) {
 }
 
 // Load all routers defensively (order preserved).
-const authRouter     = await tryRouter('./routes/auth.js');
-const publicRouter   = await tryRouter('./routes/public.js');
+const authRouter = await tryRouter('./routes/auth.js');
+const authRolesRouter = await tryRouter('./routes/auth-roles.js');
+const publicRouter = await tryRouter('./routes/public.js');
 const settingsRouter = await tryRouter('./routes/settings.js');
 const discoverRouter = await tryRouter('./routes/discover.js');
-const statusRouter   = await tryRouter('./routes/status.js');
-const requestRouter  = await tryRouter('./routes/request.js');
-const healthRouter   = await tryRouter('./routes/health.js');
+const statusRouter = await tryRouter('./routes/status.js');
+const requestRouter = await tryRouter('./routes/request.js');
+const healthRouter = await tryRouter('./routes/health.js');
 const requestsRouter = await tryRouter('./routes/requests.js');
 
 // Auth guard (only active when login is enabled).
@@ -42,17 +48,20 @@ app.use((req, res, next) => {
   const u = authSvc.verifyToken(tok);
   if (!u) return res.status(401).json({ error: 'auth required' });
   if (p.startsWith('/api/settings') && req.method !== 'GET' && u.role !== 'admin') return res.status(403).json({ error: 'admin only' });
+  if (p.startsWith('/api/health-detail') && u.role !== 'admin') return res.status(403).json({ error: 'admin only' });
+  if (p.startsWith('/api/discover/live') && u.role !== 'admin') return res.status(403).json({ error: 'admin only' });
   req.user = u;
   next();
 });
 
-if (authRouter)     app.use('/api/auth', authRouter);
-if (publicRouter)   app.use('/api/public', publicRouter);
+if (authRouter) app.use('/api/auth', authRouter);
+if (authRolesRouter) app.use('/api/auth', authRolesRouter);
+if (publicRouter) app.use('/api/public', publicRouter);
 if (settingsRouter) app.use('/api/settings', settingsRouter);
 if (discoverRouter) app.use('/api/discover', discoverRouter);
-if (statusRouter)   app.use('/api/status', statusRouter);
-if (requestRouter)  app.use('/api/request', requestRouter);
-if (healthRouter)   app.use('/api/health-detail', healthRouter);
+if (statusRouter) app.use('/api/status', statusRouter);
+if (requestRouter) app.use('/api/request', requestRouter);
+if (healthRouter) app.use('/api/health-detail', healthRouter);
 if (requestsRouter) app.use('/api/requests', requestsRouter);
 
 app.get('/api/health', (req, res) => { const c = load(); res.json({ ok: true, app: c.app.name, configured: !!c.configured }); });
@@ -61,7 +70,24 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
 
 load();
-app.listen(PORT, () => console.log(`NickSeer running on http://0.0.0.0:${PORT} (routers: ${[
-  authRouter && 'auth', publicRouter && 'public', settingsRouter && 'settings', discoverRouter && 'discover',
+const server = app.listen(PORT, () => console.log(`NickSeer running on http://0.0.0.0:${PORT} (routers: ${[
+  authRouter && 'auth', authRolesRouter && 'auth-roles', publicRouter && 'public', settingsRouter && 'settings', discoverRouter && 'discover',
   statusRouter && 'status', requestRouter && 'request', healthRouter && 'health-detail', requestsRouter && 'requests'
 ].filter(Boolean).join(', ')})`));
+
+// Graceful shutdown handling for Docker / systemd
+function handleShutdown(signal) {
+  console.log(`[server] received ${signal}, closing gracefully...`);
+  server.close(() => {
+    console.log('[server] closed all active connections. Exiting.');
+    process.exit(0);
+  });
+  // Force exit after 3s if hanging connections exist
+  setTimeout(() => {
+    console.warn('[server] forceful shutdown after timeout');
+    process.exit(0);
+  }, 3000).unref();
+}
+
+process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+process.on('SIGINT', () => handleShutdown('SIGINT'));

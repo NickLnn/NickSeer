@@ -118,7 +118,18 @@ async function render() {
 async function refreshNow() { const view = document.getElementById('liveView'); if (!view) return; const old = view.querySelector('.live-grid, .live-empty'); const tmp = document.createElement('div'); await renderNow(tmp); const fresh = tmp.querySelector('.live-grid, .live-empty'); if (old && fresh) old.replaceWith(fresh); else if (fresh) view.appendChild(fresh); }
 function isLiveActive() { const b = document.querySelector('.nav-link[data-view="live"]'); return b && b.classList.contains('active'); }
 
+async function toggleTab() {
+  const [st, me] = await Promise.all([
+    fetch('/api/auth/status').then((r) => r.json()).catch(() => ({})),
+    (localStorage.getItem('nickseer_token') ? fetch('/api/auth/me', { headers: authHeaders() }).then((r) => r.json()).catch(() => ({})) : Promise.resolve({}))
+  ]);
+  const isAdmin = me?.user?.role === 'admin';
+  document.querySelectorAll('.nav-link[data-view="live"], .drawer-item[data-view="live"]').forEach((b) => {
+    b.style.display = isAdmin ? '' : 'none';
+  });
+}
 function init() {
+  toggleTab();
   const btn = document.querySelector('.nav-link[data-view="live"]');
   if (btn) btn.addEventListener('click', () => { sub = 'now'; setTimeout(render, 0); });
   const obs = new MutationObserver(() => { if (isLiveActive() && !document.getElementById('liveView')) render(); });
