@@ -347,17 +347,51 @@ async function showView(view, force = false) {
 }
 async function getRows(force) { if (rowsCache && !force) return rowsCache; rowsCache = await api('/api/discover/rows' + (force ? '?refresh=1' : '')); return rowsCache; }
 async function renderHome(force) {
-  const [home, curated] = await Promise.all([api('/api/discover/home' + userQuery(force ? 'refresh=1' : '')), getRows(force)]);
-  app.innerHTML = '';
-  const persoRows = home.rows || [];
-  const slideItems = (persoRows[0]?.items || curated.rows?.[0]?.items || []).slice(0, 7);
-  if (slideItems.length) app.appendChild(heroSlideshow(slideItems));
-  if (home.error && (!curated.rows || !curated.rows.length)) { app.appendChild(emptyState('Finish setup to see recommendations', home.error, true)); return; }
-  if (home.cold) app.appendChild(rowSub("No watch history yet — showing trending & charts. Watch a few things in Plex and Home becomes personal."));
-  for (const row of persoRows) app.appendChild(rowEl(row.title, row.items, row.title.startsWith('Picked')));
-  for (const row of (curated.rows || [])) app.appendChild(rowEl(row.title, row.items, false, isTop(row.title), row.brand));
-  focusFirstCard();
+  try {
+    const [home, curated] = await Promise.all([
+      api('/api/discover/home' + userQuery(force ? 'refresh=1' : '')).catch(() => ({ rows: [] })),
+      getRows(force).catch(() => ({ rows: [] }))
+    ]);
+
+    app.innerHTML = '';
+    const persoRows = home?.rows || [];
+    const curatedRows = curated?.rows || [];
+    const slideItems = (persoRows[0]?.items || curatedRows[0]?.items || []).slice(0, 7);
+
+    if (slideItems.length) {
+      app.appendChild(heroSlideshow(slideItems));
+    }
+
+    if (home?.cold && !persoRows.length) {
+      app.appendChild(rowSub("No watch history yet — showing trending & charts. Watch a few things in Plex and Home becomes personal."));
+    }
+
+    // Render personalized rows first
+    for (const row of persoRows) {
+      if (row && row.items && row.items.length) {
+        app.appendChild(rowEl(row.title, row.items, row.title.startsWith('Picked')));
+      }
+    }
+
+    // Render curated global rows
+    for (const row of curatedRows) {
+      if (row && row.items && row.items.length) {
+        app.appendChild(rowEl(row.title, row.items, false, isTop(row.title), row.brand));
+      }
+    }
+
+    if (!persoRows.length && !curatedRows.length) {
+      app.appendChild(emptyState('Discover Media', 'Loading library rows... Tap Refresh if content does not appear.', true));
+    }
+
+    focusFirstCard();
+  } catch (err) {
+    console.error('[home] renderHome error:', err);
+    app.innerHTML = '';
+    app.appendChild(emptyState('Something went wrong', err.message || 'Error loading home screen. Tap below to reload.', true));
+  }
 }
+
 let movieSubTab = 'discover';
 
 function renderMovieTabsHeader(activeTab, onSwitch) {
