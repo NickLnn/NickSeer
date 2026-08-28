@@ -2386,3 +2386,99 @@ body {
     padding: 12px 18px calc(14px + var(--sab)) !important;
   }
 }
+/* ==========================================================================
+   👥 USERS & AUTH CARD UI
+   ========================================================================== */
+.user-row {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 16px !important;
+  padding: 12px 18px !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 14px !important;
+  margin-bottom: 10px !important;
+  transition: background 0.15s ease, border-color 0.15s ease !important;
+}
+
+.user-row:hover {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+}
+
+.user-av {
+  width: 42px !important;
+  height: 42px !important;
+  border-radius: 50% !important;
+  background: linear-gradient(135deg, #2E9BD6, #8b5cf6) !important;
+  color: #ffffff !important;
+  font-weight: 900 !important;
+  font-size: 15px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+  box-shadow: 0 4px 14px rgba(46, 155, 214, 0.3) !important;
+}
+
+.user-info {
+  flex: 1 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 18px !important;
+  min-width: 0 !important;
+}
+
+.user-name {
+  font-size: 15px !important;
+  font-weight: 800 !important;
+  color: #ffffff !important;
+  min-width: 110px !important;
+  letter-spacing: -0.01em !important;
+}
+
+.user-role-wrap {
+  min-width: 140px !important;
+}
+
+.role-select {
+  background: #141c2c !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  border-radius: 8px !important;
+  padding: 6px 12px !important;
+  color: #70c4f4 !important;
+  font-weight: 700 !important;
+  font-size: 13px !important;
+  cursor: pointer !important;
+  outline: none !important;
+}
+
+.user-actions {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+.mini-btn {
+  padding: 6px 12px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  border-radius: 8px !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #c9d1d9 !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+}
+
+.mini-btn:hover {
+  background: rgba(255, 255, 255, 0.14) !important;
+  color: #ffffff !important;
+}
+
+.btn-del-user:hover {
+  background: rgba(239, 68, 68, 0.2) !important;
+  border-color: rgba(239, 68, 68, 0.4) !important;
+  color: #f87171 !important;
+}

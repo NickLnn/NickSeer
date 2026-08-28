@@ -91,6 +91,67 @@ router.get('/plex/check/:id', async (req, res) => {
 });
 
 // Enable/disable Plex login (admin, or pre-auth bootstrap).
+// Import Plex friends / users as NickSeer accounts
+router.post('/plex/import', async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  try {
+    const curSettings = load();
+    const token = curSettings.services?.plex?.token || '';
+    if (!token) return res.status(200).json({ ok: false, error: 'Plex token not configured' });
+
+    let count = 0;
+    const existingUsers = new Set(auth.listUsers().map(u => u.username.toLowerCase()));
+
+    // Query plex.tv friends
+    try {
+      const pUrl = 'https://plex.tv/api/v2/friends?X-Plex-Token=' + encodeURIComponent(token);
+      const friendsRes = await fetch(pUrl, {
+        headers: {
+          'X-Plex-Token': token,
+          'X-Plex-Client-Identifier': 'nickseer-app-nas',
+          'X-Plex-Product': 'NickSeer',
+          'X-Plex-Version': '1.0.0',
+          'Accept': 'application/json'
+        },
+        signal: AbortSignal.timeout(6000)
+      });
+      if (friendsRes.ok) {
+        const friends = await friendsRes.json();
+        for (const f of (friends || [])) {
+          const name = (f.friendlyName || f.username || f.title || '').trim();
+          if (name && !existingUsers.has(name.toLowerCase())) {
+            auth.createUser({ username: name, password: Math.random().toString(36).slice(-8), role: 'user' });
+            existingUsers.add(name.toLowerCase());
+            count++;
+          }
+        }
+      }
+    } catch { /* ignore friends error */ }
+
+    // Also check PMS shared accounts
+    try {
+      const pmsUrl = (curSettings.services?.plex?.url || '').replace(/\/+$/, '') + '/accounts?X-Plex-Token=' + encodeURIComponent(token);
+      const pmsRes = await fetch(pmsUrl, { headers: { 'Accept': 'application/json' }, signal: AbortSignal.timeout(4000) });
+      if (pmsRes.ok) {
+        const pmsData = await pmsRes.json();
+        const accounts = pmsData?.MediaContainer?.Account || [];
+        for (const a of (Array.isArray(accounts) ? accounts : [accounts])) {
+          const name = (a.name || a.username || '').trim();
+          if (name && !existingUsers.has(name.toLowerCase())) {
+            auth.createUser({ username: name, password: Math.random().toString(36).slice(-8), role: 'user' });
+            existingUsers.add(name.toLowerCase());
+            count++;
+          }
+        }
+      }
+    } catch { /* ignore pms error */ }
+
+    res.json({ ok: true, imported: count, users: auth.listUsers() });
+  } catch (e) {
+    res.status(200).json({ ok: false, error: e.message });
+  }
+});
+
 router.post('/plex/enable', (req, res) => {
   if (!requireAdmin(req, res)) return;
   update({ plexAuth: { enabled: !!(req.body || {}).enabled } });
