@@ -65,6 +65,8 @@ async function compute({ userId, level }) {
     return { cold: true, rows: [{ title: 'Trending this week', items: normalize(t.results) }] };
   }
   const affinity = genreAffinity(seeds);
+  const hasKids = affinity.has(10762) || affinity.has(10751);
+  const hasMusic = affinity.has(10402);
   const owned = await safeOwned();
   const pool = new Map();
   for (const s of seeds.slice(0, 10)) {
@@ -74,11 +76,14 @@ async function compute({ userId, level }) {
         for (const c of res.results || []) {
           const id = `${s.media}:${c.id}`;
           if (owned.has(String(c.id))) continue;
+          const cGenres = c.genre_ids || [];
+          if (!hasKids && (cGenres.includes(10762) || (cGenres.includes(16) && cGenres.includes(10751)))) continue;
+          if (!hasMusic && cGenres.includes(10402)) continue;
           if (!pool.has(id)) pool.set(id, { ...c, media: s.media, _score: 0, _from: [] });
           const item = pool.get(id);
-          item._score += s.weight;
-          for (const g of c.genre_ids || []) item._score += (affinity.get(g) || 0) * 0.15;
-          item._score += (c.vote_average || 0) * 0.05;
+          item._score += s.weight * 2.0;
+          for (const g of cGenres) item._score += (affinity.get(g) || 0) * 0.35;
+          item._score += (c.vote_average || 0) * 0.1;
           if (item._from.length < 3) item._from.push(s.title);
         }
       } catch { /* skip */ }

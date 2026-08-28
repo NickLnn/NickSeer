@@ -4,6 +4,13 @@ All historical patches and architectural updates are preserved chronologically b
 
 ---
 
+## 📅 2026-08-28 03:20 — AI Taste Curation & Intelligent Candidate Filtering
+- **File:** 2026-08-28_03-20_ai_curation_prompt_and_candidate_filtering.md
+- **Details:** Upgraded local AI system prompt with strict mature tone and cinema curation rules. Added genre affinity filtering to strip out kids cartoons and concert tours for adult prestige drama viewers. Scored candidates by multi-seed overlap and genre frequency.
+
+
+---
+
 ## 📅 2026-08-28 03:14 — High-Definition Vector Streaming Logos & IMDb/TMDB Badges
 - **File:** 2026-08-28_03-14_hd_vector_brand_logos.md
 - **Details:** Replaced all streaming brand logos (Netflix, Disney+, Prime Video, HBO Max, Apple TV+, Paramount+) with pixel-perfect, high-definition SVG vectors. Upgraded IMDb and TMDB badges with official vector artwork.
