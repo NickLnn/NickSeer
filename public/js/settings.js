@@ -487,23 +487,25 @@ async function loadPlexLibraries(showToast = false) {
 }
 
 async function loadArrOptions(service) {
-  const profileSel = document.getElementById(service + 'Profile');
-  const rootSel = document.getElementById(service + 'Root');
+  const profileSel = document.getElementById('qp-' + service) || document.getElementById(service + 'Profile');
+  const rootSel = document.getElementById('rf-' + service) || document.getElementById(service + 'Root');
   if (!profileSel && !rootSel) return;
   try {
     const [profiles, roots] = await Promise.all([
       fetch('/api/settings/arr/' + service + '/profiles', { headers: authHeaders() }).then((r) => r.json()),
       fetch('/api/settings/arr/' + service + '/rootfolders', { headers: authHeaders() }).then((r) => r.json())
     ]);
-    if (Array.isArray(profiles) && profileSel) {
-      const cur = current.services[service].qualityProfileId;
-      profileSel.innerHTML = profiles.map((p) => `<option value="${p.id}" ${p.id === cur ? 'selected' : ''}>${p.name}</option>`).join('');
+    if (Array.isArray(profiles) && profiles.length && profileSel) {
+      const cur = current.services[service]?.qualityProfileId;
+      profileSel.innerHTML = profiles.map((p) => `<option value="${p.id}" ${Number(p.id) === Number(cur) ? 'selected' : ''}>${p.name}</option>`).join('');
     }
-    if (Array.isArray(roots) && rootSel) {
-      const cur = current.services[service].rootFolderPath;
+    if (Array.isArray(roots) && roots.length && rootSel) {
+      const cur = current.services[service]?.rootFolder || current.services[service]?.rootFolderPath;
       rootSel.innerHTML = roots.map((r) => `<option value="${r.path}" ${r.path === cur ? 'selected' : ''}>${r.path}</option>`).join('');
     }
-  } catch { /* ignore */ }
+  } catch (err) {
+    console.warn('[settings] loadArrOptions failed for ' + service, err);
+  }
 }
 
 async function loadUsers() {
