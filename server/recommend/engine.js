@@ -7,11 +7,24 @@ import plex from '../services/plex.js';
 import { aiRerank } from './ai.js';
 import { cached, TTL_DAY } from '../lib/cache.js';
 
-async function getHistory(userId) {
+export async function getHistory(userId) {
   const { services, recommendation } = load();
   const depth = recommendation.historyDepth || 300;
-  if (services.tautulli?.url && services.tautulli?.apikey) return { source: 'tautulli', items: await tautulli.history(depth, userId) };
-  if (services.plex?.url && services.plex?.token) return { source: 'plex', items: await plex.history(depth) };
+  if (services.tautulli?.url && services.tautulli?.apikey) {
+    try {
+      const items = await tautulli.history(depth, userId);
+      if (items && items.length) return { source: 'tautulli', items };
+    } catch (e) {
+      console.warn('[recommend] tautulli history failed:', e.message);
+    }
+  }
+  if (services.plex?.url && services.plex?.token) {
+    try {
+      return { source: 'plex', items: await plex.history(depth) };
+    } catch (e) {
+      console.warn('[recommend] plex history failed:', e.message);
+    }
+  }
   return { source: 'none', items: [] };
 }
 
@@ -40,20 +53,32 @@ async function resolve(titleKey, type) {
   } catch { return null; }
 }
 
-async function getSeeds(userId, max = 15) {
+export async function getSeeds(userId, max = 15) {
   const { items } = await getHistory(userId);
   const profile = buildTasteProfile(items);
   const top = [...profile.entries()].sort((a, b) => b[1] - a[1]).slice(0, max);
   const typeByKey = new Map(items.map((h) => [(h.grandparentTitle || h.title || '').toLowerCase().trim(), h.type]));
   const seeds = [];
-  for (const [key, weight] of top) { const r = await resolve(key, typeByKey.get(key)); if (r) seeds.push({ ...r, title: key, weight }); }
+  for (const [key, weight] of top) {
+    const r = await resolve(key, typeByKey.get(key));
+    if (r) seeds.push({ ...r, title: key, weight });
+  }
   return seeds;
 }
 
-function genreAffinity(seeds) {
+export function genreAffinity(seeds) {
   const affinity = new Map();
-  for (const s of seeds) for (const g of s.genre_ids || []) affinity.set(g, (affinity.get(g) || 0) + s.weight);
+  for (const s of seeds) {
+    for (const g of s.genre_ids || []) {
+      affinity.set(g, (affinity.get(g) || 0) + s.weight);
+    }
+  }
   return affinity;
+}
+
+export async function getUserGenreAffinity(userId) {
+  const seeds = await getSeeds(userId, 20);
+  return genreAffinity(seeds);
 }
 
 async function compute({ userId, level }) {
@@ -135,4 +160,4 @@ function normalize(list, forceMedia) {
   }));
 }
 
-export default { recommend, getSeeds };
+export default { recommend, getSeeds, getHistory, genreAffinity, getUserGenreAffinity };

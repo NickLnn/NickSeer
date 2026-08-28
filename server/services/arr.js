@@ -50,12 +50,39 @@ export async function add(kind, tmdbId, opts = {}) {
   const rootFolderPath = opts.rootFolder || s.rootFolder || (await rootFolders(kind))[0]?.path;
   const common = {
     qualityProfileId: opts.qualityProfileId || s.qualityProfileId || 1,
-    rootFolderPath, monitored: true,
+    rootFolderPath,
+    monitored: true,
     tags: Array.isArray(opts.tags) ? opts.tags : [],
-    addOptions: { searchForMovie: kind === 'radarr', searchForMissingEpisodes: kind === 'sonarr' }
+    addOptions: {
+      searchForMovie: kind === 'radarr',
+      searchForMissingEpisodes: kind === 'sonarr'
+    }
   };
-  if (kind === 'radarr') return call('radarr', '/movie', { method: 'POST', body: { ...item, ...common, minimumAvailability: 'released' } });
-  return call('sonarr', '/series', { method: 'POST', body: { ...item, ...common, languageProfileId: 1, seasonFolder: true } });
+
+  if (kind === 'radarr') {
+    return call('radarr', '/movie', { method: 'POST', body: { ...item, ...common, minimumAvailability: 'released' } });
+  }
+
+  // Sonarr per-season monitoring selection
+  let seasonsPayload = item.seasons || [];
+  if (Array.isArray(opts.seasons) && opts.seasons.length > 0) {
+    const chosenSet = new Set(opts.seasons.map(Number));
+    seasonsPayload = seasonsPayload.map(sn => ({
+      ...sn,
+      monitored: chosenSet.has(Number(sn.seasonNumber))
+    }));
+  }
+
+  return call('sonarr', '/series', {
+    method: 'POST',
+    body: {
+      ...item,
+      ...common,
+      seasons: seasonsPayload,
+      languageProfileId: 1,
+      seasonFolder: true
+    }
+  });
 }
 
 export default { test, qualityProfiles, rootFolders, tags, ensureTag, queue, lookup, add };

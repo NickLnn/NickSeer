@@ -7,15 +7,59 @@ import { load, update } from '../config.js';
 
 const router = express.Router();
 
+// In-Memory Brute-Force Rate Limiter (5 attempts / 2 min -> 60s lock)
+const failedLogins = new Map();
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const entry = failedLogins.get(ip);
+  if (!entry) return null;
+  if (entry.lockedUntil && entry.lockedUntil > now) {
+    const remainingSec = Math.ceil((entry.lockedUntil - now) / 1000);
+    return `Too many failed login attempts. Please wait ${remainingSec}s before retrying.`;
+  }
+  if (entry.lockedUntil && entry.lockedUntil <= now) {
+    failedLogins.delete(ip);
+  }
+  return null;
+}
+
+function recordFailedLogin(ip) {
+  const now = Date.now();
+  const entry = failedLogins.get(ip) || { count: 0, firstAttempt: now };
+  if (now - entry.firstAttempt > 120000) {
+    entry.count = 0;
+    entry.firstAttempt = now;
+  }
+  entry.count++;
+  if (entry.count >= 5) {
+    entry.lockedUntil = now + 60000; // 60s lockout
+  }
+  failedLogins.set(ip, entry);
+}
+
+function recordSuccessfulLogin(ip) {
+  failedLogins.delete(ip);
+}
+
+
 router.get('/status', (req, res) => {
   const c = load();
   res.json({ enabled: auth.isEnabled(), hasAdmin: auth.hasAnyAdmin(), plexLogin: c.plexAuth?.enabled !== false, approvals: !!c.auth?.approvals });
 });
 
 router.post('/login', (req, res) => {
+  const ip = req.ip || '127.0.0.1';
+  const lockErr = checkRateLimit(ip);
+  if (lockErr) return res.status(200).json({ ok: false, error: lockErr, rateLimited: true });
+
   const { username, password } = req.body || {};
   const r = auth.login(username, password);
-  if (!r) return res.status(200).json({ ok: false, error: 'Invalid username or password' });
+  if (!r) {
+    recordFailedLogin(ip);
+    return res.status(200).json({ ok: false, error: 'Invalid username or password' });
+  }
+  recordSuccessfulLogin(ip);
   res.json({ ok: true, token: r.token, user: r.user });
 });
 

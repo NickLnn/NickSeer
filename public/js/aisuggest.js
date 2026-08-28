@@ -37,6 +37,9 @@ function card(it) {
 }
 
 async function openDetail(item) {
+  if (window.openDetail && window.openDetail !== openDetail) {
+    return window.openDetail(item);
+  }
   const modal = document.getElementById('modal'); const cardEl = document.getElementById('modalCard');
   if (!modal || !cardEl) return;
   modal.classList.remove('hidden');
@@ -49,12 +52,24 @@ async function openDetail(item) {
   const ytBtn = d.trailerKey ? `<a class="btn btn-ghost btn-yt" data-nav target="_blank" href="https://www.youtube.com/watch?v=${d.trailerKey}">YouTube</a>` : '';
   const imdbBtn = d.imdbUrl ? `<a class="btn btn-imdb" data-nav target="_blank" rel="noopener" href="${d.imdbUrl}">IMDb ↗</a>` : '';
   const hero = d.trailerKey ? `<div class="modal-video"><iframe src="https://www.youtube.com/embed/${d.trailerKey}?rel=0&modestbranding=1" allow="encrypted-media; picture-in-picture" allowfullscreen></iframe></div>` : `<div class="modal-hero" style="background-image:url(${d.backdrop || ''})"></div>`;
+  
+  let ownBadgesHtml = '';
+  if (d.inLibrary) ownBadgesHtml += '<span class="own-pill in-lib" title="In your Plex library"><span class="own-tick">✓</span>In library</span>';
+  if (media === 'tv' && d.seriesStatus) ownBadgesHtml += '<span class="own-pill ' + (d.seriesStatus === 'ended' ? 'ended' : 'cont') + '">' + (d.seriesStatus === 'ended' ? '■ Ended' : '● Continuing') + '</span>';
+  
   cardEl.innerHTML = `<button class="modal-close" data-nav onclick="document.getElementById('modal').classList.add('hidden')">✕</button>${hero}<div class="modal-body">
-    <h2 class="modal-title">${d.title || ''}</h2>${d.tagline ? `<div class="modal-tagline">${d.tagline}</div>` : ''}
+    <div class="title-row"><h2 class="modal-title">${d.title || ''}</h2><div class="own-badges">${ownBadgesHtml}</div></div>${d.tagline ? `<div class="modal-tagline">${d.tagline}</div>` : ''}
     <div class="modal-meta">${d.year ? `<span>${d.year}</span>` : ''}${d.rating ? `<span style="color:var(--gold)">★ ${d.rating.toFixed(1)}</span>` : ''}<span class="chip">${media === 'tv' ? 'TV' : 'Movie'}</span>${(d.genres || []).slice(0, 3).map((g) => `<span class="chip">${g}</span>`).join('')}${imdbBadge}</div>
     ${item.why ? `<div class="why-chip" style="position:static;display:inline-block;margin-bottom:12px">✨ ${item.why}</div>` : ''}
     <p class="modal-overview">${d.overview || 'No description available.'}</p>
     <div class="modal-actions"><button class="btn btn-accent" id="aisReq">＋  Request</button>${ytBtn}${imdbBtn}</div></div>`;
+  
+  if (d.streamingService && window.renderStreamPill) {
+    const ob = cardEl.querySelector('.own-badges');
+    const sp = window.renderStreamPill(d.streamingService);
+    if (ob && sp) ob.appendChild(sp);
+  }
+  
   const rq = cardEl.querySelector('#aisReq');
   if (rq) rq.onclick = async () => { rq.disabled = true; rq.textContent = 'Requesting…'; const r = await fetch('/api/request', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ media, tmdbId: item.id, title: d.title, poster: item.poster }) }).then((x) => x.json()).catch((e) => ({ ok: false, error: e.message })); rq.textContent = r.ok ? '✓ Requested' : (r.code === 'pending' ? '✓ Sent for approval' : '✕ ' + (r.error || 'failed')); };
   if (window.__nsUpgradeButtons) window.__nsUpgradeButtons(cardEl);

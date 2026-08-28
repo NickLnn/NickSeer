@@ -228,6 +228,7 @@ document.addEventListener('keydown', (e) => {
 });
 // Update nav focus on hover for mouse/touch pointer
 document.addEventListener('mouseover', (e) => {
+  if (window.matchMedia && !window.matchMedia('(hover: hover)').matches) return;
   const el = e.target.closest(BASE_SELECTOR);
   if (el) window._navCurrent = el;
 });

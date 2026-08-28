@@ -35,21 +35,28 @@ const requestRouter = await tryRouter('./routes/request.js');
 const healthRouter = await tryRouter('./routes/health.js');
 const requestsRouter = await tryRouter('./routes/requests.js');
 
-// Auth guard (only active when login is enabled).
+// Hardened Auth Guard
 app.use((req, res, next) => {
   const c = load();
   const p = req.path || '';
   if (!c.auth?.enabled) return next();
   if (!p.startsWith('/api')) return next();
   if (p === '/api/health') return next();
-  if (p.startsWith('/api/auth')) return next();
+  if (p.startsWith('/api/auth/login') || p.startsWith('/api/auth/status') || p.startsWith('/api/auth/plex/start') || p.startsWith('/api/auth/plex/poll')) return next();
   if (p.startsWith('/api/public')) return next();
+
   const tok = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
   const u = authSvc.verifyToken(tok);
   if (!u) return res.status(401).json({ error: 'auth required' });
-  if (p.startsWith('/api/settings') && req.method !== 'GET' && u.role !== 'admin') return res.status(403).json({ error: 'admin only' });
-  if (p.startsWith('/api/health-detail') && u.role !== 'admin') return res.status(403).json({ error: 'admin only' });
-  if (p.startsWith('/api/discover/live') && u.role !== 'admin') return res.status(403).json({ error: 'admin only' });
+
+  // Admin-only endpoints protection
+  if (p.startsWith('/api/settings') && u.role !== 'admin') return res.status(403).json({ error: 'admin access required' });
+  if (p.startsWith('/api/health-detail') && u.role !== 'admin') return res.status(403).json({ error: 'admin access required' });
+  if (p.startsWith('/api/discover/live') && u.role !== 'admin') return res.status(403).json({ error: 'admin access required' });
+  if ((p === '/api/auth/users' || p === '/api/auth/users/role' || p === '/api/auth/users/delete') && u.role !== 'admin') {
+    return res.status(403).json({ error: 'admin access required' });
+  }
+
   req.user = u;
   next();
 });

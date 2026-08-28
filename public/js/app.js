@@ -358,15 +358,175 @@ async function renderHome(force) {
   for (const row of (curated.rows || [])) app.appendChild(rowEl(row.title, row.items, false, isTop(row.title), row.brand));
   focusFirstCard();
 }
+let movieSubTab = 'discover';
+
+function renderMovieTabsHeader(activeTab, onSwitch) {
+  const head = el('div', { class: 'movies-subtab-header' }, [
+    el('div', { class: 'movies-title-wrap' }, [
+      el('h2', { class: 'movies-main-title' }, 'Movies'),
+      el('div', { class: 'seg movies-seg', role: 'tablist' }, [
+        el('button', {
+          class: 'seg-btn ' + (activeTab === 'discover' ? 'on' : ''),
+          'data-nav': '',
+          onclick: () => onSwitch('discover')
+        }, '🎬 Discover & Charts'),
+        el('button', {
+          class: 'seg-btn ' + (activeTab === 'collections' ? 'on' : ''),
+          'data-nav': '',
+          onclick: () => onSwitch('collections')
+        }, '📦 Collections')
+      ])
+    ])
+  ]);
+  return head;
+}
+
 async function renderCategory(media, force) {
-  const [trend, imdb] = await Promise.all([api('/api/discover/trending' + (force ? '?refresh=1' : '')), api(`/api/discover/imdb-top?media=${media}` + (force ? '&refresh=1' : ''))]);
+  if (media === 'movie') {
+    app.innerHTML = '';
+    const header = renderMovieTabsHeader(movieSubTab, (tab) => {
+      movieSubTab = tab;
+      renderCategory('movie', false);
+    });
+    app.appendChild(header);
+
+    if (movieSubTab === 'collections') {
+      const colDiv = el('div', { id: 'moviesColSubView' });
+      app.appendChild(colDiv);
+      if (window.renderCollectionsView) {
+        // Render collections view inside the app container below the subtabs
+        await renderCollectionsContent(colDiv, force);
+      }
+      return;
+    }
+
+    const [trend, imdb] = await Promise.all([
+      api('/api/discover/trending' + (force ? '?refresh=1' : '')),
+      api('/api/discover/imdb-top?media=movie' + (force ? '&refresh=1' : ''))
+    ]);
+    const trlist = trend.movies || [];
+    const trItems = trlist.map((c) => normalize(c, 'movie'));
+    if (trItems.slice(0, 7).length) app.appendChild(heroSlideshow(trItems.slice(0, 7)));
+    app.appendChild(rowEl('Trending Movies', trItems));
+    app.appendChild(rowEl('IMDb Top 250 · Movies', (imdb.items || []).map((c) => normalize(c, 'movie')), false, true));
+    focusFirstCard();
+    return;
+  }
+
+  const [trend, imdb] = await Promise.all([
+    api('/api/discover/trending' + (force ? '?refresh=1' : '')),
+    api(`/api/discover/imdb-top?media=${media}` + (force ? '&refresh=1' : ''))
+  ]);
   app.innerHTML = '';
-  const trlist = (media === 'movie' ? trend.movies : trend.tv) || [];
+  const trlist = trend.tv || [];
   const trItems = trlist.map((c) => normalize(c, media));
   if (trItems.slice(0, 7).length) app.appendChild(heroSlideshow(trItems.slice(0, 7)));
-  app.appendChild(rowEl(media === 'movie' ? 'Trending Movies' : 'Trending Series', trItems));
-  app.appendChild(rowEl(media === 'movie' ? 'IMDb Top 250 · Movies' : 'IMDb Top 250 · Series', (imdb.items || []).map((c) => normalize(c, media)), false, true));
+  app.appendChild(rowEl('Trending Series', trItems));
+  app.appendChild(rowEl('IMDb Top 250 · Series', (imdb.items || []).map((c) => normalize(c, media)), false, true));
   focusFirstCard();
+}
+
+async function renderCollectionsContent(container, force) {
+  container.innerHTML = `
+    <div class="collections-view">
+      <div class="collections-header">
+        <div class="col-head-left">
+          <h2 class="col-main-title">📦 Movie Collections & Franchises</h2>
+          <p class="col-main-sub">Complete your movie sagas — suggestions based on movies in your Plex library with missing sequels & prequels.</p>
+        </div>
+      </div>
+      <div id="colContent" class="collections-content">
+        <div class="col-loading"><span class="sp">⟳</span> Discovering movie collections from your library…</div>
+      </div>
+    </div>
+  `;
+
+  const colBox = container.querySelector('#colContent');
+  const data = await api(`/api/discover/collections${force ? '?refresh=1' : ''}`);
+
+  if (data.error || !data.all || !data.all.length) {
+    colBox.innerHTML = `<div class="empty-state"><h3>No collections found</h3><p>${data.error || 'Ensure TMDB API key is configured.'}</p></div>`;
+    return;
+  }
+
+  colBox.innerHTML = '';
+
+  if (data.incomplete && data.incomplete.length) {
+    const row = createCollectionRowEl('⚡ Incomplete in Your Library', 'You own parts of these franchises — one click to complete the entire saga!', data.incomplete);
+    if (row) colBox.appendChild(row);
+  }
+
+  if (data.popular && data.popular.length) {
+    const row = createCollectionRowEl('🔥 Popular Franchises & Sagas', 'Acclaimed movie collections and complete universes to binge.', data.popular);
+    if (row) colBox.appendChild(row);
+  }
+
+  if (data.completed && data.completed.length) {
+    const row = createCollectionRowEl('✓ Completed in Your Library', 'Franchises where you already own every single movie!', data.completed);
+    if (row) colBox.appendChild(row);
+  }
+}
+
+function createCollectionRowEl(title, subtitle, collections) {
+  if (!collections || !collections.length) return null;
+  const section = document.createElement('section');
+  section.className = 'col-section';
+  section.innerHTML = `
+    <div class="col-section-head">
+      <h3 class="col-section-title">${title}</h3>
+      ${subtitle ? `<span class="col-section-sub">${subtitle}</span>` : ''}
+    </div>
+    <div class="col-row-scroller"></div>
+  `;
+  const scroller = section.querySelector('.col-row-scroller');
+  collections.forEach(col => {
+    const card = createCollectionCardEl(col);
+    if (card) scroller.appendChild(card);
+  });
+  return section;
+}
+
+function createCollectionCardEl(col) {
+  const card = document.createElement('div');
+  card.className = 'collection-card';
+  card.setAttribute('data-nav', '');
+  card.tabIndex = 0;
+
+  const pct = col.completionPercent || 0;
+  const isComplete = col.missing === 0 && col.owned > 0;
+  const isIncomplete = col.owned > 0 && col.missing > 0;
+
+  let badgeHtml = '';
+  if (isComplete) {
+    badgeHtml = `<span class="col-badge complete">✓ Complete (${col.total}/${col.total})</span>`;
+  } else if (isIncomplete) {
+    badgeHtml = `<span class="col-badge incomplete">⚡ ${col.owned}/${col.total} in Library · ${col.missing} Missing</span>`;
+  } else {
+    badgeHtml = `<span class="col-badge unowned">${col.total} Movies</span>`;
+  }
+
+  const posterImg = col.poster || col.backdrop || '/favicon.svg';
+
+  card.innerHTML = `
+    <div class="col-poster-wrap">
+      <img class="col-poster" src="${posterImg}" alt="${col.name}" loading="lazy" />
+      <div class="col-gradient-overlay"></div>
+      ${badgeHtml}
+      <div class="col-progress-wrap">
+        <div class="col-progress-bar">
+          <i style="width:${pct}%;background:${isComplete ? '#35d07f' : 'linear-gradient(90deg, #2E9BD6, #f5c518)'}"></i>
+        </div>
+      </div>
+    </div>
+    <div class="col-info">
+      <div class="col-title" title="${col.name}">${col.name}</div>
+      <div class="col-meta">${col.total} Parts · ${col.owned > 0 ? col.owned + ' Owned' : 'Not in library'}</div>
+    </div>
+  `;
+
+  card.onclick = () => { if (window.openCollectionModal) window.openCollectionModal(col.id); };
+  card.onkeydown = (e) => { if (e.key === 'Enter' && window.openCollectionModal) window.openCollectionModal(col.id); };
+  return card;
 }
 async function renderStreaming(force) {
   const curated = await getRows(force);
@@ -549,6 +709,7 @@ function downloadRow(name, percent, timeLeft) {
   return el('div', { class: 'dl-item' }, [el('div', { class: 'dl-row' }, [el('span', { class: 'dl-name' }, name || 'item'), el('span', { class: 'dl-meta' }, (percent != null ? percent + '%' : '') + (timeLeft ? ' · ' + timeLeft : ''))]), el('div', { class: 'bar' }, [el('i', { style: `width:${percent || 0}%` })])]);
 }
 // ---------- detail modal (with ownership badges) ----------
+window.openDetail = openDetail;
 async function openDetail(item) {
   const modal = document.getElementById('modal');
   const cardEl = document.getElementById('modalCard');
@@ -565,10 +726,14 @@ async function openDetail(item) {
   cardEl.appendChild(el('button', { class: 'modal-close', 'data-nav': '', onclick: closeModal }, '✕'));
   if (d.trailerKey) cardEl.appendChild(el('div', { class: 'modal-video', html: `<iframe src="https://www.youtube.com/embed/${d.trailerKey}?autoplay=0&rel=0&modestbranding=1" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>` }));
   else { const mh = el('div', { class: 'modal-hero' }); if (d.backdrop) mh.style.backgroundImage = `url(${d.backdrop})`; cardEl.appendChild(mh); }
-  // Title row + ownership badges (✓ in library, series status).
+  // Title row + ownership badges (✓ in library, series status, streaming brand logo).
   const ownBadges = el('div', { class: 'own-badges' });
   if (d.inLibrary) ownBadges.appendChild(el('span', { class: 'own-pill in-lib', title: 'In your Plex library' }, [el('span', { class: 'own-tick' }, '✓'), 'In library']));
   if (media === 'tv' && d.seriesStatus) ownBadges.appendChild(el('span', { class: 'own-pill ' + (d.seriesStatus === 'ended' ? 'ended' : 'cont') }, d.seriesStatus === 'ended' ? '■ Ended' : '● Continuing'));
+  if (d.streamingService && window.renderStreamPill) {
+    const sp = window.renderStreamPill(d.streamingService);
+    if (sp) ownBadges.appendChild(sp);
+  }
   const titleRow = el('div', { class: 'title-row' }, [el('h2', { class: 'modal-title', style: 'margin:0' }, d.title), ownBadges]);
   const meta = el('div', { class: 'modal-meta' }, [
     d.year ? el('span', {}, d.year) : null,
@@ -592,10 +757,26 @@ async function openDetail(item) {
     d.trailerKey ? el('a', { class: 'btn btn-ghost', 'data-nav': '', href: `https://www.youtube.com/watch?v=${d.trailerKey}`, target: '_blank' }, '▶  YouTube') : null,
     d.imdbUrl ? el('a', { class: 'btn btn-imdb', 'data-nav': '', href: d.imdbUrl, target: '_blank', rel: 'noopener' }, 'IMDb ↗') : null
   ]);
+  let colChip = null;
+  if (d.collection) {
+    colChip = el('div', {
+      class: 'modal-collection-chip',
+      'data-nav': '',
+      onclick: () => {
+        if (window.openCollectionModal) window.openCollectionModal(d.collection.id);
+      }
+    }, [
+      el('span', { class: 'mcol-icon' }, '🎬'),
+      el('span', { class: 'mcol-text' }, ['Part of ', el('b', {}, d.collection.name)]),
+      el('span', { class: 'mcol-arrow' }, 'View Franchise →')
+    ]);
+  }
+
   const body = el('div', { class: 'modal-body' }, [
     titleRow,
     d.tagline ? el('div', { class: 'modal-tagline' }, d.tagline) : null,
     meta,
+    colChip,
     item.why ? el('div', { class: 'why-chip', style: 'position:static;display:inline-block;margin-bottom:12px' }, '✨ ' + item.why) : null,
     el('p', { class: 'modal-overview' }, d.overview || 'No description available.'),
     actions
@@ -635,6 +816,7 @@ document.addEventListener('nav:back', () => {
   const modal = document.getElementById('modal');
   if (!modal.classList.contains('hidden')) closeModal();
 });
+window.openRequestModal = openRequestModal;
 async function openRequestModal(item) {
   const media = item.media === 'show' ? 'tv' : item.media || 'movie';
   if (!item.id) { toast('No TMDB match to request', 'bad'); return; }
@@ -646,6 +828,53 @@ async function openRequestModal(item) {
   const opts = await api('/api/request/options?media=' + media);
   const cardEl = host.querySelector('.req-card');
   if (opts.error) { cardEl.innerHTML = requestHeader(media, item) + `<div class="req-body"><div class="req-note bad">⚠ ${opts.error}</div></div><div class="req-footer"><button class="btn btn-ghost" id="reqCancel">Close</button></div>`; cardEl.style.setProperty('--req-bg', item.backdrop ? `url(${item.backdrop})` : 'none'); host.querySelector('#reqCancel').onclick = closeRequestModal; return; }
+  // Load seasons if TV series
+  let tvSeasons = item.seasons || [];
+  if (media === 'tv' && (!tvSeasons || !tvSeasons.length) && item.id) {
+    try {
+      const d = await api('/api/discover/tv/' + item.id);
+      if (d && d.seasons) tvSeasons = d.seasons;
+    } catch {}
+  }
+  const validSeasons = (tvSeasons || []).filter(s => s.season_number > 0);
+
+  let seasonsTableHtml = '';
+  if (media === 'tv' && validSeasons.length > 0) {
+    seasonsTableHtml = `
+      <div class="req-seasons-block">
+        <div class="req-seasons-head">
+          <div class="season-row-left">
+            <label class="switch-ui master-switch">
+              <input type="checkbox" id="masterSeasonToggle" checked />
+              <span class="switch-slider"></span>
+            </label>
+            <span class="stbl-col col-title">SEASONS</span>
+          </div>
+          <span class="stbl-col col-eps desktop-only">EPISODES</span>
+          <span class="stbl-col col-status">STATUS</span>
+        </div>
+        <div class="req-seasons-list">
+          ${validSeasons.map(s => `
+            <div class="req-season-row" data-season="${s.season_number}">
+              <div class="season-row-left">
+                <label class="switch-ui">
+                  <input type="checkbox" class="season-item-toggle" data-season="${s.season_number}" checked />
+                  <span class="switch-slider"></span>
+                </label>
+                <div class="season-info-meta">
+                  <span class="season-main-title">${s.name || ('Season ' + s.season_number)}</span>
+                  <span class="season-sub-eps mobile-only">${s.episode_count || 0} episodes</span>
+                </div>
+              </div>
+              <span class="stbl-col col-eps desktop-only">${s.episode_count || 0}</span>
+              <span class="stbl-col col-status"><span class="req-season-pill not-req">Not Requested</span></span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
   const profileOpts = opts.profiles.map((p) => `<option value="${p.id}" ${p.id == opts.defaultProfileId ? 'selected' : ''}>${p.name}${p.id == opts.defaultProfileId ? ' (Default)' : ''}</option>`).join('');
   const rootOpts = opts.rootFolders.map((f) => `<option value="${f.path}" ${f.path === opts.defaultRootFolder ? 'selected' : ''}>${f.label}${f.path === opts.defaultRootFolder ? ' (Default)' : ''}</option>`).join('');
   const tagChips = opts.tags.map((t) => `<span class="tag-chip" data-tag="${t.id}">${t.label}</span>`).join('');
@@ -655,11 +884,12 @@ async function openRequestModal(item) {
     ${requestHeader(media, item)}
     <div class="req-body">
       <div class="req-note ${opts.autoApprove ? 'ok' : ''}" style="${opts.autoApprove ? '' : 'background:rgba(245,197,24,.12);color:#f5c518;'}">ⓘ &nbsp;${opts.autoApprove ? 'This request will be approved automatically.' : 'This request will be submitted for admin approval.'}</div>
-      <div class="req-adv">Advanced</div>
+      ${seasonsTableHtml}
+      <div class="req-adv">Advanced Settings</div>
       <div class="req-grid">
-        <div class="req-field"><label>Destination Server</label><select id="reqServer">${opts.servers.map((s) => `<option value="${s.id}">${s.name}</option>`).join('')}</select></div>
-        <div class="req-field"><label>Quality Profile</label><select id="reqProfile">${profileOpts || '<option>Default</option>'}</select></div>
-        <div class="req-field"><label>Root Folder</label><select id="reqRoot">${rootOpts || '<option>Default</option>'}</select></div>
+        <div class="req-field"><label>Destination Server</label><select id="reqServer" class="custom-select">${opts.servers.map((s) => `<option value="${s.id}">${s.name}</option>`).join('')}</select></div>
+        <div class="req-field"><label>Quality Profile</label><select id="reqProfile" class="custom-select">${profileOpts || '<option>Default</option>'}</select></div>
+        <div class="req-field"><label>Root Folder</label><select id="reqRoot" class="custom-select">${rootOpts || '<option>Default</option>'}</select></div>
       </div>
       <div class="req-field"><label>Tags</label>
         <div class="tag-picker" id="reqTags">${tagChips || '<span class="req-muted" style="padding:6px">No tags in ' + opts.kind + ' yet — type to add one.</span>'}</div>
@@ -668,15 +898,51 @@ async function openRequestModal(item) {
       <div class="req-field"><label>Request As</label><div class="req-as"><span class="req-avatar">${(requester || 'N')[0].toUpperCase()}</span><span>${requester}</span></div></div>
     </div>
     <div class="req-footer"><button class="btn btn-ghost" id="reqCancel">Cancel</button><button class="btn btn-accent" id="reqSubmit">Request</button></div>`;
+
+  // Master and individual season toggle handlers
+  const masterTog = cardEl.querySelector('#masterSeasonToggle');
+  if (masterTog) {
+    masterTog.onchange = () => {
+      cardEl.querySelectorAll('.season-item-toggle').forEach(t => t.checked = masterTog.checked);
+    };
+    cardEl.querySelectorAll('.season-item-toggle').forEach(t => {
+      t.onchange = () => {
+        const all = [...cardEl.querySelectorAll('.season-item-toggle')];
+        const checkedCount = all.filter(x => x.checked).length;
+        masterTog.checked = checkedCount === all.length;
+      };
+    });
+  }
   const selected = new Set();
   cardEl.querySelectorAll('.tag-chip').forEach((chip) => chip.addEventListener('click', () => { const id = Number(chip.dataset.tag); if (selected.has(id)) { selected.delete(id); chip.classList.remove('on'); } else { selected.add(id); chip.classList.add('on'); } }));
   const newTags = [];
   const newTagInput = cardEl.querySelector('#reqNewTag');
   newTagInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && newTagInput.value.trim()) { e.preventDefault(); const label = newTagInput.value.trim(); newTags.push(label); cardEl.querySelector('#reqTags').appendChild(el('span', { class: 'tag-chip on' }, label)); newTagInput.value = ''; } });
-  cardEl.querySelector('#reqCancel').onclick = closeRequestModal;
+  cardEl.querySelector('#reqCancel')?.addEventListener('click', closeRequestModal);
+  cardEl.querySelector('#reqCloseBtn')?.addEventListener('click', closeRequestModal);
   cardEl.querySelector('#reqSubmit').onclick = async () => {
     const btn = cardEl.querySelector('#reqSubmit'); btn.disabled = true; btn.textContent = 'Requesting…';
-    const payload = { media, tmdbId: item.id, title: item.title || '', poster: item.poster || '', qualityProfileId: cardEl.querySelector('#reqProfile')?.value || undefined, rootFolder: cardEl.querySelector('#reqRoot')?.value || undefined, tags: [...selected], newTags };
+    let selectedSeasons = undefined;
+    if (media === 'tv') {
+      selectedSeasons = [...cardEl.querySelectorAll('.season-item-toggle:checked')].map(t => Number(t.dataset.season));
+      if (!selectedSeasons.length) {
+        toast('Please select at least one season to request', 'bad');
+        btn.disabled = false;
+        btn.textContent = 'Request';
+        return;
+      }
+    }
+    const payload = {
+      media,
+      tmdbId: item.id,
+      title: item.title || '',
+      poster: item.poster || '',
+      qualityProfileId: cardEl.querySelector('#reqProfile')?.value || undefined,
+      rootFolder: cardEl.querySelector('#reqRoot')?.value || undefined,
+      tags: [...selected],
+      newTags,
+      seasons: selectedSeasons
+    };
     const r = await api('/api/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     if (r.ok && r.code === 'pending') showRequestResult(cardEl, item, { kind: r.kind, state: 'pending' });
     else if (r.ok) showRequestResult(cardEl, item, { kind: r.kind, state: 'added' });
@@ -699,7 +965,14 @@ function showRequestResult(cardEl, item, { kind, state }) {
   const done = cardEl.querySelector('#reqDone'); done.onclick = closeRequestModal; setTimeout(() => setFocus(done), 60);
   setTimeout(() => { const h = document.getElementById('requestModal'); if (h && !h.classList.contains('hidden')) closeRequestModal(); }, 2600);
 }
-function requestHeader(media, item) { return `<div class="req-hero" style="background-image:var(--req-bg)"></div><div class="req-head"><div class="req-kicker">Request ${media === 'tv' ? 'Series' : 'Movie'}</div><div class="req-name">${item.title || ''}</div></div>`; }
+function requestHeader(media, item) {
+  return `<div class="req-hero" style="background-image:var(--req-bg)"></div>
+  <button type="button" class="modal-close req-modal-close" id="reqCloseBtn" title="Close">✕</button>
+  <div class="req-head">
+    <div class="req-kicker">Request ${media === 'tv' ? 'Series' : 'Movie'}</div>
+    <div class="req-name">${item.title || ''}</div>
+  </div>`;
+}
 function closeRequestModal() { const host = document.getElementById('requestModal'); if (host) host.classList.add('hidden'); }
 function isTop(title) { return /· Top 10$/.test(title || '') || /Top 250/.test(title || ''); }
 function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
@@ -711,3 +984,6 @@ function skeleton() { const cards = Array.from({ length: 7 }).map(() => '<div cl
 function emptyState(title, sub, showSettings) { return el('div', { class: 'empty' }, [el('h3', {}, title), el('p', {}, sub || ''), showSettings ? el('button', { class: 'btn btn-accent', 'data-nav': '', style: 'margin-top:16px', onclick: () => openSettings(false) }, 'Open Settings') : null]); }
 function focusFirstCard() { setTimeout(() => { const first = document.querySelector('.hero-actions .btn, .card, .status-card, .seg button'); if (first) setFocus(first); }, 120); }
 boot();
+
+
+

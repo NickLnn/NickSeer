@@ -47,10 +47,10 @@ function toastLite(msg) { const w = document.getElementById('toasts'); if (!w) r
 // Inject into the Info grid (moved off Downloads).
 function maybeInject() {
   const grid = document.getElementById('infoGrid');
-  if (!grid || grid.querySelector('.plex-card')) return;
+  if (!grid || grid.querySelector('.plex-card') || document.querySelector('.plex-card')) return;
   buildCard(grid);
 }
 document.addEventListener('info:rendered', maybeInject);
 const obs = new MutationObserver(() => maybeInject());
 obs.observe(document.getElementById('app') || document.body, { childList: true, subtree: true });
-setTimeout(maybeInject, 500);
+setTimeout(maybeInject, 300);

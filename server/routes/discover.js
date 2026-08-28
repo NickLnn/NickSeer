@@ -1,3 +1,4 @@
+import collections from '../services/collections.js';
 // Discovery routes. KEY CHANGE: mini() now passes through `imdbRating` when an
 // item carries `_imdbRating` (from the IMDb chart scrape) — so those posters get
 // the IMDb badge instantly, no OMDb call. Also: /imdb-ratings batch, /brand-logos.
@@ -26,7 +27,7 @@ async function posterFor(title, year, media) {
 }
 function tuning() { const t = load().aiTuning || {}; return { minRating: Number.isFinite(t.minRating) ? t.minRating : 6.2, minVotes: Number.isFinite(t.minVotes) ? t.minVotes : 80, maxCandidates: Number.isFinite(t.maxCandidates) ? t.maxCandidates : 50, historyDays: Number.isFinite(t.historyDays) ? t.historyDays : 60, englishOnly: t.englishOnly === undefined ? false : !!t.englishOnly }; }
 
-router.get('/home', async (req, res) => { try { res.json(await engine.recommend({ userId: req.query.userId, force: isForce(req) })); } catch (e) { res.status(200).json({ error: e.message, rows: [] }); } });
+router.get('/home', async (req, res) => { try { const userId = req.user?.username || req.user?.plexId || req.query.userId; res.json(await engine.recommend({ userId, force: isForce(req) })); } catch (e) { res.status(200).json({ error: e.message, rows: [] }); } });
 
 router.get('/rows', async (req, res) => { try { res.json(await cached('rows:curated', TTL_DAY, buildCuratedRows, isForce(req))); } catch (e) { res.status(200).json({ error: e.message, rows: [] }); } });
 async function buildCuratedRows() {
@@ -83,14 +84,15 @@ router.get('/imdb-top', async (req, res) => {
 });
 
 // AI suggestions (60-day default, tunable)
-async function recentHistory(days) { const c = load(); if (c.services.tautulli?.url && c.services.tautulli?.apikey) { try { return await tautulli.historyDays(days, undefined, 800); } catch { /* fall */ } } if (c.services.plex?.url && c.services.plex?.token) { try { const h = await plex.history(500); const cut = Date.now() / 1000 - days * 86400; return h.filter((x) => Number(x.viewedAt || 0) >= cut); } catch { return []; } } return []; }
+async function recentHistory(days, userId) { const c = load(); if (c.services.tautulli?.url && c.services.tautulli?.apikey) { try { return await tautulli.historyDays(days, userId, 800); } catch { /* fall */ } } if (c.services.plex?.url && c.services.plex?.token) { try { const h = await plex.history(500); const cut = Date.now() / 1000 - days * 86400; return h.filter((x) => Number(x.viewedAt || 0) >= cut); } catch { return []; } } return []; }
 async function resolveSeed(key, type) { try { const media = type === 'show' ? 'tv' : 'movie'; const r = await tmdb.search(key, media); const hit = (r.results || [])[0]; return hit ? { id: hit.id, media, genre_ids: hit.genre_ids || [], genres: (hit.genre_ids || []).join(','), lang: hit.original_language || 'en', title: key } : null; } catch { return null; } }
 router.get('/ai-suggest', async (req, res) => {
   const cfg = load(); const aiOn = cfg.ai?.provider && cfg.ai.provider !== 'none'; const T = tuning();
   try {
-    const key = `ai-suggest:v3:${req.query.userId || 'all'}:${cfg.ai?.provider || 'none'}:${T.minRating}:${T.minVotes}:${T.maxCandidates}:${T.historyDays}:${T.englishOnly ? 'en' : 'multi'}`;
+    const activeUser = req.user?.username || req.user?.plexId || req.query.userId || 'all';
+    const key = `ai-suggest:v3:${activeUser}:${cfg.ai?.provider || 'none'}:${T.minRating}:${T.minVotes}:${T.maxCandidates}:${T.historyDays}:${T.englishOnly ? 'en' : 'multi'}`;
     const data = await cached(key, TTL_DAY, async () => {
-      const hist = await recentHistory(T.historyDays);
+      const hist = await recentHistory(T.historyDays, activeUser !== 'all' ? activeUser : undefined);
       if (!hist.length) return { source: aiOn ? 'ai' : 'rules', items: [], note: 'no-history', days: T.historyDays };
       const weight = new Map(); const typeOf = new Map();
       for (const h of hist) { const k = (h.grandparentTitle || h.title || '').toLowerCase().trim(); if (!k) continue; weight.set(k, (weight.get(k) || 0) + 1); typeOf.set(k, h.type); }
@@ -140,6 +142,95 @@ router.get('/top/:provider', async (req, res) => { try { const media = req.query
 router.get('/trending', async (req, res) => { try { const [movies, tv] = await Promise.all([tmdb.trending('movie', 'week'), tmdb.trending('tv', 'week')]); res.json({ movies: movies.results, tv: tv.results }); } catch (e) { res.status(200).json({ error: e.message }); } });
 router.get('/search', async (req, res) => { try { const data = await tmdb.search(req.query.q || '', 'multi'); res.json((data.results || []).filter((r) => r.media_type !== 'person').map(mini)); } catch (e) { res.status(200).json({ error: e.message }); } });
 
+
+const STREAM_ALIASES = [
+  { key: 'apple', name: 'Apple TV+', patterns: [/apple tv/i, /apple\s*tv\+/i, /apple studios/i] },
+  { key: 'netflix', name: 'Netflix', patterns: [/netflix/i] },
+  { key: 'disney', name: 'Disney+', patterns: [/disney\+/i, /disney plus/i, /disney/i, /pixar/i, /marvel studios/i, /lucasfilm/i, /star\+/i] },
+  { key: 'max', name: 'Max', patterns: [/hbo max/i, /\bmax\b/i, /\bhbo\b/i, /warner bros/i] },
+  { key: 'amazon', name: 'Prime Video', patterns: [/prime video/i, /amazon/i, /amazon studios/i, /mgm\+/i] },
+  { key: 'paramount', name: 'Paramount+', patterns: [/paramount\+/i, /paramount plus/i, /paramount pictures/i, /showtime/i] },
+  { key: 'hulu', name: 'Hulu', patterns: [/hulu/i, /fx on hulu/i] },
+  { key: 'peacock', name: 'Peacock', patterns: [/peacock/i, /universal pictures/i] },
+  { key: 'amc', name: 'AMC', patterns: [/\bamc\+/i, /\bamc\b/i] },
+  { key: 'crunchyroll', name: 'Crunchyroll', patterns: [/crunchyroll/i, /funimation/i] },
+  { key: 'starz', name: 'Starz', patterns: [/starz/i] },
+  { key: 'bbc', name: 'BBC', patterns: [/bbc/i, /bbc iplayer/i] }
+];
+
+function matchStreamAlias(str) {
+  if (!str) return null;
+  for (const s of STREAM_ALIASES) {
+    if (s.patterns.some((p) => p.test(str))) return s;
+  }
+  return null;
+}
+
+function detectStreamingService(d, media, region = 'US') {
+  if (media === 'tv' && d.networks && d.networks.length) {
+    for (const net of d.networks) {
+      const match = matchStreamAlias(net.name);
+      if (match) return { key: match.key, name: match.name, logo: net.logo_path ? 'https://image.tmdb.org/t/p/w185' + net.logo_path : null };
+    }
+    const topNet = d.networks[0];
+    if (topNet) return { key: 'network', name: topNet.name, logo: topNet.logo_path ? 'https://image.tmdb.org/t/p/w185' + topNet.logo_path : null };
+  }
+
+  const provs = d['watch/providers']?.results || {};
+  const testRegions = [region, 'US', 'GR', 'GB', 'CA', 'AU', 'DE', 'FR'].filter(Boolean);
+  const seenRegions = new Set();
+  for (const r of testRegions) {
+    if (seenRegions.has(r)) continue;
+    seenRegions.add(r);
+    const flat = provs[r]?.flatrate || [];
+    for (const item of flat) {
+      const match = matchStreamAlias(item.provider_name);
+      if (match) return { key: match.key, name: match.name, logo: item.logo_path ? 'https://image.tmdb.org/t/p/w185' + item.logo_path : null };
+    }
+  }
+  for (const r of testRegions) {
+    const flat = provs[r]?.flatrate || [];
+    if (flat.length && flat[0]) return { key: 'provider', name: flat[0].provider_name, logo: flat[0].logo_path ? 'https://image.tmdb.org/t/p/w185' + flat[0].logo_path : null };
+  }
+  if (media === 'movie' && d.production_companies && d.production_companies.length) {
+    for (const comp of d.production_companies) {
+      const match = matchStreamAlias(comp.name);
+      if (match) return { key: match.key, name: match.name, logo: comp.logo_path ? 'https://image.tmdb.org/t/p/w185' + comp.logo_path : null };
+    }
+    const topComp = d.production_companies[0];
+    if (topComp && topComp.name) return { key: 'studio', name: topComp.name, logo: topComp.logo_path ? 'https://image.tmdb.org/t/p/w185' + topComp.logo_path : null };
+  }
+  for (const r of testRegions) {
+    const rentOrBuy = [...(provs[r]?.buy || []), ...(provs[r]?.rent || [])];
+    for (const item of rentOrBuy) {
+      const match = matchStreamAlias(item.provider_name);
+      if (match) return { key: match.key, name: match.name, logo: item.logo_path ? 'https://image.tmdb.org/t/p/w185' + item.logo_path : null };
+    }
+  }
+  return null;
+}
+
+
+router.get('/collections', async (req, res) => {
+  try {
+    const userId = req.user?.username || req.user?.plexId || req.query.userId || '';
+    const data = await collections.getCollections({ userId, force: req.query.refresh === '1' });
+    res.json(data);
+  } catch (e) {
+    res.status(200).json({ error: e.message, incomplete: [], popular: [], completed: [] });
+  }
+});
+
+router.get('/collection/:id', async (req, res) => {
+  try {
+    const col = await collections.getCollection(req.params.id);
+    if (!col) return res.status(404).json({ error: 'Collection not found' });
+    res.json(col);
+  } catch (e) {
+    res.status(200).json({ error: e.message });
+  }
+});
+
 router.get('/:media/:id', async (req, res) => {
   const { media, id } = req.params;
   try {
@@ -152,7 +243,48 @@ router.get('/:media/:id', async (req, res) => {
     const owned = map[String(d.id)] || null;
     let seriesStatus = null, episodePercent = null, episodesOwned = null, episodesTotal = null;
     if (media === 'tv') { const raw = (d.status || '').toLowerCase(); if (raw.includes('end') || raw.includes('cancel')) seriesStatus = 'ended'; else if (raw.includes('return') || raw.includes('production') || raw.includes('airing')) seriesStatus = 'continuing'; episodesTotal = d.number_of_episodes || null; if (owned && episodesTotal) { episodesOwned = owned.leafCount || 0; episodePercent = Math.max(0, Math.min(100, Math.round((episodesOwned / episodesTotal) * 100))); } }
-    res.json({ id: d.id, media, title: d.title || d.name, tagline: d.tagline, year: (d.release_date || d.first_air_date || '').slice(0, 4), overview: d.overview, genres: (d.genres || []).map((g) => g.name), runtime: d.runtime || (d.episode_run_time || [])[0], rating: d.vote_average, imdbId, imdbUrl: imdbId ? `https://www.imdb.com/title/${imdbId}/` : null, imdbRating: imdb ? imdb.rating : null, imdbVotes: imdb ? imdb.votes : null, poster: tmdb.img(d.poster_path, 'w500'), backdrop: tmdb.img(d.backdrop_path, 'original'), trailerKey: trailer ? trailer.key : null, inLibrary: !!owned, seriesStatus, episodePercent, episodesOwned, episodesTotal, cast: (d.credits?.cast || []).slice(0, 16).map((c) => ({ id: c.id, name: c.name, character: c.character, photo: tmdb.img(c.profile_path, 'w185') })), similar: (d.similar?.results || []).slice(0, 20).map(mini), recommendations: (d.recommendations?.results || []).slice(0, 20).map(mini) });
+        const streamingService = detectStreamingService(d, media, load().tmdb?.region || 'US');
+        const seasons = media === 'tv' ? (d.seasons || [])
+      .filter(s => s.season_number > 0 || (s.season_number === 0 && s.episode_count > 0))
+      .map(s => ({
+        season_number: s.season_number,
+        name: s.name || ('Season ' + s.season_number),
+        episode_count: s.episode_count || 0,
+        air_date: s.air_date || '',
+        poster: tmdb.img(s.poster_path, 'w342')
+      })) : [];
+
+    res.json({
+      id: d.id,
+      media,
+      title: d.title || d.name,
+      tagline: d.tagline,
+      year: (d.release_date || d.first_air_date || '').slice(0, 4),
+      overview: d.overview,
+      genres: (d.genres || []).map((g) => g.name),
+      runtime: d.runtime || (d.episode_run_time || [])[0],
+      rating: d.vote_average,
+      imdbId,
+      imdbUrl: imdbId ? ("https://www.imdb.com/title/" + imdbId + "/") : null,
+      imdbRating: imdb ? imdb.rating : null,
+      imdbVotes: imdb ? imdb.votes : null,
+      poster: tmdb.img(d.poster_path, 'w500'),
+      backdrop: tmdb.img(d.backdrop_path, 'original'),
+      trailerKey: trailer ? trailer.key : null,
+      inLibrary: !!owned,
+      libraryServer: owned?.server || 'Plex',
+      librarySection: owned?.section || '',
+      seriesStatus,
+      episodePercent,
+      episodesOwned,
+      episodesTotal,
+      streamingService,
+      seasons: media === 'tv' ? seasons : undefined,
+      collection: d.belongs_to_collection ? { id: d.belongs_to_collection.id, name: d.belongs_to_collection.name, poster: tmdb.img(d.belongs_to_collection.poster_path, 'w500'), backdrop: tmdb.img(d.belongs_to_collection.backdrop_path, 'original') } : null,
+      cast: (d.credits?.cast || []).slice(0, 16).map((c) => ({ id: c.id, name: c.name, character: c.character, photo: tmdb.img(c.profile_path, 'w185') })),
+      similar: (d.similar?.results || []).slice(0, 20).map(mini),
+      recommendations: (d.recommendations?.results || []).slice(0, 20).map(mini)
+    });
   } catch (e) { res.status(200).json({ error: e.message }); }
 });
 
