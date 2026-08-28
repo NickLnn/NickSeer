@@ -350,7 +350,6 @@ case 'tautulli':
 
 
 let plexServersCache = [];
-let isPlexLoading = false;
 
 async function loadPlexServers() {
   const dropdown = document.getElementById('plexServerDropdown');
@@ -404,9 +403,6 @@ async function loadPlexServers() {
 }
 
 async function loadPlexLibraries(showToast = false) {
-  if (isPlexLoading) return;
-  isPlexLoading = true;
-
   const listWrap = document.getElementById('plexLibPickerList');
   const discoverBtn = document.getElementById('btnLoadPlexLibs');
   const rescanBtn = document.getElementById('btnRescanPlex');
@@ -414,10 +410,9 @@ async function loadPlexLibraries(showToast = false) {
   if (discoverBtn) { discoverBtn.disabled = true; discoverBtn.textContent = '⟳ Scanning…'; }
   if (rescanBtn) { rescanBtn.disabled = true; rescanBtn.textContent = '⟳ Scanning…'; }
 
-  if (listWrap) {
-    listWrap.style.opacity = '0.5';
-    listWrap.style.pointerEvents = 'none';
-  }
+  // Preserve scroll position
+  const panel = document.querySelector('.set-panel-body') || document.getElementById('settingsBody');
+  const savedScroll = panel ? panel.scrollTop : 0;
 
   try {
     collect();
@@ -433,9 +428,6 @@ async function loadPlexLibraries(showToast = false) {
     const res = await fetch('/api/settings/plex/sections?' + qs.toString(), { headers: authHeaders() }).then((r) => r.json());
     
     if (listWrap) {
-      listWrap.style.opacity = '1';
-      listWrap.style.pointerEvents = 'auto';
-
       if (!res.ok || !res.sections || !res.sections.length) {
         listWrap.innerHTML = `<div style="padding:10px 0;"><span class="row-sub" style="color:#ff6b6b">⚠️ ${res.error || 'No movie or TV libraries found for this server.'}</span></div>`;
         if (showToast) toast('✕ ' + (res.error || 'No libraries found'), 'bad');
@@ -450,14 +442,14 @@ async function loadPlexLibraries(showToast = false) {
           <div style="font-size:13.5px;font-weight:800;color:#2E9BD6;display:flex;align-items:center;gap:8px;">
             <span>Connected Server: <b>${res.server || 'Plex Server'}</b></span>
             <span style="background:rgba(46,155,214,0.2);color:#70c4f4;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700;">v${res.version || ''}</span>
-            <span style="color:#8b949e;font-size:11px;font-weight:500;">(Synced ${nowTime})</span>
+            <span style="background:rgba(63,185,80,0.18);color:#3fb950;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700;">✓ Synced ${nowTime}</span>
           </div>
-          <button type="button" class="btn btn-ghost" id="btnRescanPlex" style="font-size:12px;padding:4px 10px;border-radius:8px;background:rgba(255,255,255,0.06);cursor:pointer;">⟳ Re-scan</button>
+          <button type="button" class="btn btn-ghost" id="btnRescanPlex" style="font-size:12px;padding:4px 12px;border-radius:8px;background:rgba(255,255,255,0.08);color:#ffffff;font-weight:700;cursor:pointer;">⟳ Re-scan</button>
         </div>
         ${res.sections.map((sec) => {
           const isChecked = !saved.length || saved.includes(String(sec.key)) || saved.includes(sec.title);
           return `
-            <label style="display:flex;align-items:center;gap:10px;font-size:13.5px;color:#f0f6fc;cursor:pointer;padding:5px 0;">
+            <label style="display:flex;align-items:center;gap:10px;font-size:13.5px;color:#f0f6fc;cursor:pointer;padding:6px 0;">
               <input type="checkbox" class="plex-lib-cb" value="${sec.key}" data-title="${sec.title}" ${isChecked ? 'checked' : ''} />
               <span><b>${sec.title}</b> <span style="color:#8a8f9d;font-size:12px;">(${sec.type === 'movie' ? 'Movies' : 'TV Shows'})</span></span>
             </label>
@@ -465,8 +457,18 @@ async function loadPlexLibraries(showToast = false) {
         }).join('')}
       `;
 
+      // Wire re-scan
       const newRescan = listWrap.querySelector('#btnRescanPlex');
       if (newRescan) newRescan.onclick = (e) => { e.preventDefault(); e.stopPropagation(); loadPlexLibraries(true); };
+
+      // Restore scroll
+      if (panel) panel.scrollTop = savedScroll;
+
+      if (discoverBtn) {
+        discoverBtn.disabled = false;
+        discoverBtn.textContent = '✓ Synced!';
+        setTimeout(() => { if (discoverBtn) discoverBtn.textContent = '🔍 Discover Libraries'; }, 2500);
+      }
 
       if (showToast) {
         toast(`✓ Connected to ${res.server || 'Plex'} — ${res.sections.length} libraries synced`, 'ok');
@@ -474,40 +476,34 @@ async function loadPlexLibraries(showToast = false) {
     }
   } catch (e) {
     if (listWrap) {
-      listWrap.style.opacity = '1';
-      listWrap.style.pointerEvents = 'auto';
       listWrap.innerHTML = `<div style="padding:10px 0;"><span class="row-sub" style="color:#ff6b6b">⚠️ ${e.message}</span></div>`;
     }
     if (showToast) toast('✕ ' + e.message, 'bad');
   } finally {
-    isPlexLoading = false;
-    if (discoverBtn) { discoverBtn.disabled = false; discoverBtn.textContent = '🔍 Discover Libraries'; }
+    if (discoverBtn) { discoverBtn.disabled = false; }
     const curRescan = document.getElementById('btnRescanPlex');
     if (curRescan) { curRescan.disabled = false; curRescan.textContent = '⟳ Re-scan'; }
   }
 }
 
-async function loadArrOptions(kind) {
-  const qpSel = document.getElementById('qp-' + kind), rfSel = document.getElementById('rf-' + kind);
+async function loadArrOptions(service) {
+  const profileSel = document.getElementById(service + 'Profile');
+  const rootSel = document.getElementById(service + 'Root');
+  if (!profileSel && !rootSel) return;
   try {
     const [profiles, roots] = await Promise.all([
-      fetch(`/api/settings/arr/${kind}/profiles`, { headers: authHeaders() }).then((r) => r.json()),
-      fetch(`/api/settings/arr/${kind}/rootfolders`, { headers: authHeaders() }).then((r) => r.json())
+      fetch('/api/settings/arr/' + service + '/profiles', { headers: authHeaders() }).then((r) => r.json()),
+      fetch('/api/settings/arr/' + service + '/rootfolders', { headers: authHeaders() }).then((r) => r.json())
     ]);
-    if (qpSel && Array.isArray(profiles) && profiles.length) {
-      const cur = current.services[kind].qualityProfileId;
-      qpSel.innerHTML = profiles.map((p) => `<option value="${p.id}" ${p.id == cur ? 'selected' : ''}>${p.name} (id ${p.id})</option>`).join('');
+    if (Array.isArray(profiles) && profileSel) {
+      const cur = current.services[service].qualityProfileId;
+      profileSel.innerHTML = profiles.map((p) => `<option value="${p.id}" ${p.id === cur ? 'selected' : ''}>${p.name}</option>`).join('');
     }
-    if (rfSel && Array.isArray(roots) && roots.length) {
-      const cur = current.services[kind].rootFolder;
-      rfSel.innerHTML = roots.map((f) => `<option value="${f.path}" ${f.path === cur ? 'selected' : ''}>${f.path}${f.freeSpace ? ` — ${fmtGB(f.freeSpace)} free` : ''}</option>`).join('');
+    if (Array.isArray(roots) && rootSel) {
+      const cur = current.services[service].rootFolderPath;
+      rootSel.innerHTML = roots.map((r) => `<option value="${r.path}" ${r.path === cur ? 'selected' : ''}>${r.path}</option>`).join('');
     }
-  } catch { /* keep current */ }
-}
-
-function fmtGB(b) {
-  const gb = b / 1073741824;
-  return gb > 1024 ? (gb / 1024).toFixed(1) + ' TB' : gb.toFixed(0) + ' GB';
+  } catch { /* ignore */ }
 }
 
 async function loadUsers() {
@@ -520,58 +516,138 @@ async function loadUsers() {
   }
   const users = data.users || [];
   pane.innerHTML = `
-    <div class="set-field" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+    <!-- Dedicated Gold Import from Plex Card -->
+    <div style="background:linear-gradient(135deg,rgba(229,160,13,0.14),rgba(46,155,214,0.12));border:1px solid rgba(229,160,13,0.35);border-radius:14px;padding:16px 18px;margin-bottom:18px;display:flex;align-items:center;justify-content:space-between;gap:16px;">
       <div>
-        <label class="set-field-lbl" style="margin:0;">Require login for NickSeer</label>
-        <div class="field-hint">When active, users must authenticate to view library and request media.</div>
+        <div style="font-size:14.5px;font-weight:800;color:#f5c518;display:flex;align-items:center;gap:8px;">
+          <span>📥 Import Users & Friends from Plex</span>
+        </div>
+        <div style="font-size:12.5px;color:#c9d1d9;margin-top:3px;">Automatically import your Plex home users and shared friends as NickSeer accounts.</div>
+      </div>
+      <button type="button" class="btn btn-gold" id="importPlexUsersBtn" style="background:linear-gradient(135deg,#e5a00d,#f5c518);color:#1a1500;font-weight:900;padding:9px 18px;border-radius:10px;cursor:pointer;flex-shrink:0;border:none;">
+        📥 Import from Plex
+      </button>
+    </div>
+
+    <!-- Require Login Switch -->
+    <div class="set-field" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;background:rgba(255,255,255,0.03);padding:14px 18px;border-radius:14px;border:1px solid rgba(255,255,255,0.08);">
+      <div>
+        <label class="set-field-lbl" style="margin:0;font-size:14px;font-weight:800;">Require login for NickSeer</label>
+        <div class="field-hint" style="font-size:12px;color:#8b949e;margin-top:2px;">When active, users must authenticate to view library and request media.</div>
       </div>
       <div class="seg" id="authToggle">
         <button data-val="off" class="${data.enabled ? '' : 'active'}">Off</button>
         <button data-val="on" class="${data.enabled ? 'active' : ''}">On</button>
       </div>
     </div>
+
+    <!-- User Accounts List -->
+    <div style="font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;color:#9aa0ad;margin-bottom:10px;">User Accounts</div>
     <div id="userList">${users.map(userRow).join('') || '<p class="row-sub">No user accounts created yet.</p>'}</div>
-    <div class="section-label" style="margin-top:20px;">Add New User</div>
-    <div class="row-2">
+
+    <!-- Add New User -->
+    <div style="font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;color:#9aa0ad;margin-top:24px;margin-bottom:10px;">Add New User</div>
+    <div class="row-2" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
       <div class="set-field"><label class="set-field-lbl">Username</label><input class="set-input" id="nu-name" placeholder="e.g. maria" autocomplete="off" /></div>
       <div class="set-field"><label class="set-field-lbl">Password</label><input class="set-input" id="nu-pass" type="password" placeholder="choose a password" autocomplete="new-password" /></div>
     </div>
-    <div class="set-field"><label class="set-field-lbl">Role</label>
+    <div class="set-field" style="display:flex;align-items:center;justify-content:space-between;margin-top:4px;">
+      <div>
+        <label class="set-field-lbl">Role</label>
+        <div class="field-hint">Admins can access settings, approve requests, and manage users.</div>
+      </div>
       <div class="seg" id="nu-role"><button data-val="user" class="active">User</button><button data-val="admin">Admin</button></div>
     </div>
-    <button type="button" class="btn btn-accent" id="nu-add">Create User</button>
-    <span id="nu-msg" class="test-result" style="margin-left:10px"></span>
+    <div style="margin-top:14px;"><button class="btn btn-primary" id="nu-btn" style="padding:9px 20px;font-size:13.5px;font-weight:700;">＋ Create User</button></div>
   `;
 
-  pane.querySelectorAll('#authToggle button').forEach((b) => b.addEventListener('click', async () => {
-    const on = b.dataset.val === 'on';
-    const r = await fetch('/api/auth/enable', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ enabled: on }) }).then((x) => x.json());
-    if (r.ok) { toast(on ? 'Login requirement is ON' : 'Login turned OFF', 'ok'); loadUsers(); }
-    else toast(r.error || 'Failed', 'bad');
-  }));
-  pane.querySelectorAll('#nu-role button').forEach((b) => b.addEventListener('click', () => { b.parentElement.querySelectorAll('button').forEach((x) => x.classList.remove('active')); b.classList.add('active'); }));
-  pane.querySelector('#nu-add').addEventListener('click', async () => {
-    const username = pane.querySelector('#nu-name').value.trim();
-    const password = pane.querySelector('#nu-pass').value;
-    const role = pane.querySelector('#nu-role .active').dataset.val;
-    const msg = pane.querySelector('#nu-msg');
-    const r = await fetch('/api/auth/users', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ username, password, role }) }).then((x) => x.json());
-    if (r.ok) { msg.textContent = '✓ created'; msg.className = 'test-result ok'; loadUsers(); }
-    else { msg.textContent = '✕ ' + (r.error || 'failed'); msg.className = 'test-result bad'; }
+  // Wire Import from Plex button
+  const importBtn = document.getElementById('importPlexUsersBtn');
+  if (importBtn) {
+    importBtn.onclick = async (e) => {
+      e.preventDefault();
+      importBtn.disabled = true;
+      importBtn.textContent = '⟳ Importing from Plex…';
+      try {
+        const res = await fetch('/api/auth/plex/import', { method: 'POST', headers: authHeaders() }).then(r => r.json());
+        if (res.ok) {
+          toast(`✓ Imported ${res.imported} users from Plex`, 'ok');
+          loadUsers();
+        } else {
+          toast('✕ ' + (res.error || 'Plex import failed'), 'bad');
+          importBtn.disabled = false;
+          importBtn.textContent = '📥 Import from Plex';
+        }
+      } catch (err) {
+        toast('✕ ' + err.message, 'bad');
+        importBtn.disabled = false;
+        importBtn.textContent = '📥 Import from Plex';
+      }
+    };
+  }
+
+  // Wire Auth toggle
+  const toggle = document.getElementById('authToggle');
+  if (toggle) {
+    toggle.querySelectorAll('button').forEach((b) => {
+      b.onclick = async () => {
+        const val = b.dataset.val === 'on';
+        toggle.querySelectorAll('button').forEach((x) => x.classList.toggle('active', x === b));
+        const res = await fetch('/api/auth/enable', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ enabled: val }) }).then((r) => r.json());
+        toast(res.enabled ? '✓ Login required for NickSeer' : '✓ Open access mode enabled', 'ok');
+      };
+    });
+  }
+
+  // Wire New user creation
+  const addBtn = document.getElementById('nu-btn');
+  if (addBtn) {
+    addBtn.onclick = async () => {
+      const name = (document.getElementById('nu-name')?.value || '').trim();
+      const pass = (document.getElementById('nu-pass')?.value || '').trim();
+      const role = document.querySelector('#nu-role .active')?.dataset.val || 'user';
+      if (!name || !pass) return toast('Username and password required', 'bad');
+      const res = await fetch('/api/auth/users', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ username: name, password: pass, role }) }).then((r) => r.json());
+      if (res.ok) { toast(`✓ User "${name}" created`, 'ok'); loadUsers(); }
+      else toast('✕ ' + (res.error || 'failed'), 'bad');
+    };
+  }
+
+  // Wire User Rows
+  wireUserRows();
+}
+
+function wireUserRows() {
+  const pane = document.getElementById('usersPane');
+  if (!pane) return;
+
+  pane.querySelectorAll('.role-select').forEach((sel) => {
+    sel.onchange = async () => {
+      const username = sel.dataset.user;
+      const role = sel.value;
+      const r = await fetch('/api/auth/users/role', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ username, role }) }).then((x) => x.json());
+      toast(r.ok ? `✓ ${username} set to ${role}` : (r.error || 'failed'), r.ok ? 'ok' : 'bad');
+    };
   });
-  pane.querySelectorAll('[data-pw]').forEach((b) => b.addEventListener('click', async () => {
-    const username = b.dataset.pw;
-    const np = prompt(`New password for ${username}:`);
-    if (!np) return;
-    const r = await fetch('/api/auth/users/password', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ username, password: np }) }).then((x) => x.json());
-    toast(r.ok ? `Password updated for ${username}` : (r.error || 'failed'), r.ok ? 'ok' : 'bad');
-  }));
-  pane.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', async () => {
-    const username = b.dataset.del;
-    if (!confirm(`Delete user ${username}?`)) return;
-    const r = await fetch('/api/auth/users/delete', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ username }) }).then((x) => x.json());
-    if (r.ok) { toast(`Deleted ${username}`, 'ok'); loadUsers(); }
-  }));
+
+  pane.querySelectorAll('[data-pw]').forEach((b) => {
+    b.onclick = async () => {
+      const username = b.dataset.pw;
+      const np = prompt(`New password for ${username}:`);
+      if (!np) return;
+      const r = await fetch('/api/auth/users/password', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ username, password: np }) }).then((x) => x.json());
+      toast(r.ok ? `✓ Password updated for ${username}` : (r.error || 'failed'), r.ok ? 'ok' : 'bad');
+    };
+  });
+
+  pane.querySelectorAll('[data-del]').forEach((b) => {
+    b.onclick = async () => {
+      const username = b.dataset.del;
+      if (!confirm(`Delete user ${username}?`)) return;
+      const r = await fetch('/api/auth/users/delete', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ username }) }).then((x) => x.json());
+      if (r.ok) { toast(`✓ Deleted ${username}`, 'ok'); loadUsers(); }
+    };
+  });
 }
 
 function userRow(u) {
