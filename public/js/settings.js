@@ -350,6 +350,8 @@ case 'tautulli':
 
 
 let plexServersCache = [];
+let isPlexLoading = false;
+
 async function loadPlexServers() {
   const dropdown = document.getElementById('plexServerDropdown');
   const refreshBtn = document.getElementById('btnRefreshPlexServers');
@@ -401,8 +403,6 @@ async function loadPlexServers() {
   }
 }
 
-let isPlexLoading = false;
-
 async function loadPlexLibraries(showToast = false) {
   if (isPlexLoading) return;
   isPlexLoading = true;
@@ -414,8 +414,8 @@ async function loadPlexLibraries(showToast = false) {
   if (discoverBtn) { discoverBtn.disabled = true; discoverBtn.textContent = '⟳ Scanning…'; }
   if (rescanBtn) { rescanBtn.disabled = true; rescanBtn.textContent = '⟳ Scanning…'; }
 
-  if (listWrap && (!listWrap.querySelector('.plex-lib-cb') || showToast)) {
-    listWrap.style.opacity = '0.6';
+  if (listWrap) {
+    listWrap.style.opacity = '0.5';
     listWrap.style.pointerEvents = 'none';
   }
 
@@ -469,7 +469,7 @@ async function loadPlexLibraries(showToast = false) {
       if (newRescan) newRescan.onclick = (e) => { e.preventDefault(); e.stopPropagation(); loadPlexLibraries(true); };
 
       if (showToast) {
-        toast(`✓ Synced ${res.sections.length} libraries from ${res.server || 'Plex'}`, 'ok');
+        toast(`✓ Connected to ${res.server || 'Plex'} — ${res.sections.length} libraries synced`, 'ok');
       }
     }
   } catch (e) {

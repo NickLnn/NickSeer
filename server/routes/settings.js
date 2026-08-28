@@ -77,9 +77,17 @@ router.get('/plex/servers', async (req, res) => {
             const conns = s.connections || [];
             const localConn = conns.find(c => c.local)?.uri;
             const remoteConn = conns.find(c => !c.local && !c.relay)?.uri || conns.find(c => c.relay)?.uri || conns[0]?.uri;
-            // For own local server, prioritize current configured URL if matches local network
-            let best = localConn || remoteConn || '';
-            if (s.owned && curUrl) best = curUrl;
+            
+            // Intelligent URI selection:
+            // For owned server: prioritize local configured URL or localConn.
+            // For shared/invited servers: prioritize remoteConn (public IP / plex.direct domain).
+            let best = '';
+            if (s.owned) {
+              best = curUrl || localConn || remoteConn || '';
+            } else {
+              best = remoteConn || localConn || '';
+            }
+
             servers.push({
               name: s.name,
               owned: !!s.owned,
