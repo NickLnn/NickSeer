@@ -50,7 +50,7 @@ app.use((req, res, next) => {
   if (!u) return res.status(401).json({ error: 'auth required' });
 
   // Admin-only endpoints protection
-  if (p.startsWith('/api/settings') && u.role !== 'admin') return res.status(403).json({ error: 'admin access required' });
+  if (p.startsWith('/api/settings') && p !== '/api/settings/status' && u.role !== 'admin') return res.status(403).json({ error: 'admin access required' });
   if (p.startsWith('/api/health-detail') && u.role !== 'admin') return res.status(403).json({ error: 'admin access required' });
   if (p.startsWith('/api/discover/live') && u.role !== 'admin') return res.status(403).json({ error: 'admin access required' });
   if ((p === '/api/auth/users' || p === '/api/auth/users/role' || p === '/api/auth/users/delete') && u.role !== 'admin') {

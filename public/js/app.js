@@ -40,6 +40,11 @@ function brandBadge(key) {
 // ---------- login & auth gating ----------
 import { renderAegeanLogin, promptReauth, getMe } from './login-enhance.js';
 async function ensureAuth() {
+  try {
+    const st = await fetch('/api/auth/status').then((r) => r.json()).catch(() => ({ enabled: false }));
+    if (!st || !st.enabled) return true;
+  } catch { /* proceed */ }
+
   const tok = authToken();
   if (tok) {
     const me = await fetch('/api/auth/me', { headers: { Authorization: 'Bearer ' + tok } }).then((r) => r.json()).catch(() => ({ ok: false }));
@@ -48,6 +53,7 @@ async function ensureAuth() {
   await showLogin();
   return false;
 }
+
 function showLogin() {
   return new Promise((resolve) => {
     // Hide all overlays that might be open
@@ -224,17 +230,31 @@ async function boot() {
   await afterAuth();
 }
 async function afterAuth() {
-  const status = await api('/api/settings/status');
-  if (status && status._401) return;
-  if (!status.configured) { openSettings(true); return; }
+  let health = { configured: true };
+  try {
+    const h = await api('/api/health');
+    if (h && typeof h.configured === 'boolean') health = h;
+  } catch {
+    health = { configured: true };
+  }
+
+  if (health.configured === false) {
+    openSettings(true);
+    return;
+  }
+
   paintProfileBadge();
-  await updateRoleVisibility();
+  try {
+    await updateRoleVisibility();
+  } catch { /* ignore */ }
+
   if (!getProfile()) {
     await chooseProfile(false);
   } else {
     showView('home');
   }
 }
+
 document.addEventListener('settings:saved', () => { rowsCache = null; showView(currentView); });
 document.getElementById('profileBtn')?.addEventListener('click', () => chooseProfile(true));
 document.getElementById('bottomProfileBtn')?.addEventListener('click', () => chooseProfile(true));
