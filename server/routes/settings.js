@@ -134,8 +134,8 @@ router.get('/plex/sections', async (req, res) => {
   }
 });
 
-router.get('/arr/:kind/profiles', async (req, res) => { try { res.json(await arr.qualityProfiles(req.params.kind)); } catch (e) { res.status(200).json({ error: e.message }); } });
-router.get('/arr/:kind/rootfolders', async (req, res) => { try { res.json(await arr.rootFolders(req.params.kind)); } catch (e) { res.status(200).json({ error: e.message }); } });
+router.get('/arr/:kind/profiles', async (req, res) => { try { const custom = { url: req.query.url, apikey: req.query.apikey }; res.json(await arr.qualityProfiles(req.params.kind, custom)); } catch (e) { res.status(200).json({ error: e.message }); } });
+router.get('/arr/:kind/rootfolders', async (req, res) => { try { const custom = { url: req.query.url, apikey: req.query.apikey }; res.json(await arr.rootFolders(req.params.kind, custom)); } catch (e) { res.status(200).json({ error: e.message }); } });
 
 router.get('/users', async (req, res) => {
   try { const users = await tautulli.users(); res.json((users || []).filter((u) => u.user_id).map((u) => ({ id: u.user_id, name: u.friendly_name || u.username, thumb: u.thumb }))); }

@@ -1,15 +1,17 @@
 // Radarr + Sonarr share almost the same API (Servarr v3), so one module handles both.
 import { load } from '../config.js';
 
-function cfg(kind) {
+function cfg(kind, custom = {}) {
   const { services } = load();
-  const s = services[kind];
-  if (!s || !s.url || !s.apikey) throw new Error(`${kind} not configured`);
-  return { base: s.url.replace(/\/+$/, ''), key: s.apikey, s };
+  const s = services[kind] || {};
+  const base = (custom.url || s.url || '').replace(/\/+$/, '');
+  const key = custom.apikey || s.apikey || '';
+  if (!base || !key) throw new Error(`${kind} not configured`);
+  return { base, key, s };
 }
 
-async function call(kind, pathname, { method = 'GET', body } = {}) {
-  const { base, key } = cfg(kind);
+async function call(kind, pathname, { method = 'GET', body, custom } = {}) {
+  const { base, key } = cfg(kind, custom);
   const res = await fetch(`${base}/api/v3${pathname}`, {
     method, headers: { 'X-Api-Key': key, 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined
@@ -19,13 +21,13 @@ async function call(kind, pathname, { method = 'GET', body } = {}) {
   return text ? JSON.parse(text) : {};
 }
 
-export async function test(kind) {
-  const status = await call(kind, '/system/status');
+export async function test(kind, custom) {
+  const status = await call(kind, '/system/status', { custom });
   return { ok: true, version: status.version, instance: status.instanceName };
 }
 
-export const qualityProfiles = (kind) => call(kind, '/qualityprofile');
-export const rootFolders = (kind) => call(kind, '/rootfolder');
+export const qualityProfiles = (kind, custom) => call(kind, '/qualityprofile', { custom });
+export const rootFolders = (kind, custom) => call(kind, '/rootfolder', { custom });
 export const tags = (kind) => call(kind, '/tag');
 export const queue = (kind) => call(kind, '/queue?pageSize=50&includeUnknownMovieItems=true&includeMovie=true');
 

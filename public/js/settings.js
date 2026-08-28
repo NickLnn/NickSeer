@@ -402,12 +402,45 @@ async function loadPlexServers() {
   }
 }
 
+async function loadArrOptions(service) {
+  const profileSel = document.getElementById('qp-' + service) || document.getElementById(service + 'Profile');
+  const rootSel = document.getElementById('rf-' + service) || document.getElementById(service + 'Root');
+  if (!profileSel && !rootSel) return;
+
+  const urlInp = document.querySelector(`#settingsBody input[data-path="services.${service}.url"]`);
+  const keyInp = document.querySelector(`#settingsBody input[data-path="services.${service}.apikey"]`);
+  const urlVal = urlInp ? urlInp.value.trim() : (current.services?.[service]?.url || '');
+  const keyVal = keyInp ? keyInp.value.trim() : (current.services?.[service]?.apikey || '');
+
+  const qs = new URLSearchParams();
+  if (urlVal) qs.set('url', urlVal);
+  if (keyVal && !keyVal.startsWith('••••')) qs.set('apikey', keyVal);
+
+  try {
+    const [profiles, roots] = await Promise.all([
+      fetch(`/api/settings/arr/${service}/profiles?` + qs.toString(), { headers: authHeaders() }).then((r) => r.json()),
+      fetch(`/api/settings/arr/${service}/rootfolders?` + qs.toString(), { headers: authHeaders() }).then((r) => r.json())
+    ]);
+
+    if (Array.isArray(profiles) && profiles.length && profileSel) {
+      const cur = current.services[service]?.qualityProfileId;
+      profileSel.innerHTML = profiles.map((p) => `<option value="${p.id}" ${Number(p.id) === Number(cur) ? 'selected' : ''}>${p.name}</option>`).join('');
+    }
+    if (Array.isArray(roots) && roots.length && rootSel) {
+      const cur = current.services[service]?.rootFolder || current.services[service]?.rootFolderPath;
+      rootSel.innerHTML = roots.map((r) => `<option value="${r.path}" ${r.path === cur ? 'selected' : ''}>${r.path}</option>`).join('');
+    }
+  } catch (err) {
+    console.warn('[settings] loadArrOptions failed for ' + service, err);
+  }
+}
+
 async function loadPlexLibraries(showToast = false) {
   const listWrap = document.getElementById('plexLibPickerList');
   const discoverBtn = document.getElementById('btnLoadPlexLibs');
   const rescanBtn = document.getElementById('btnRescanPlex');
 
-  if (discoverBtn) { discoverBtn.disabled = true; discoverBtn.textContent = '⟳ Scanning…'; }
+  if (discoverBtn) { discoverBtn.disabled = true; discoverBtn.textContent = '⟳ Scanning Plex…'; }
   if (rescanBtn) { rescanBtn.disabled = true; rescanBtn.textContent = '⟳ Scanning…'; }
 
   // Preserve scroll position
@@ -438,13 +471,13 @@ async function loadPlexLibraries(showToast = false) {
       const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       
       listWrap.innerHTML = `
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.08);">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.08);">
           <div style="font-size:13.5px;font-weight:800;color:#2E9BD6;display:flex;align-items:center;gap:8px;">
             <span>Connected Server: <b>${res.server || 'Plex Server'}</b></span>
             <span style="background:rgba(46,155,214,0.2);color:#70c4f4;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700;">v${res.version || ''}</span>
             <span style="background:rgba(63,185,80,0.18);color:#3fb950;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700;">✓ Synced ${nowTime}</span>
           </div>
-          <button type="button" class="btn btn-ghost" id="btnRescanPlex" style="font-size:12px;padding:4px 12px;border-radius:8px;background:rgba(255,255,255,0.08);color:#ffffff;font-weight:700;cursor:pointer;">⟳ Re-scan</button>
+          <button type="button" class="btn btn-ghost" id="btnRescanPlex" style="font-size:12px;padding:5px 14px;border-radius:8px;background:rgba(255,255,255,0.08);color:#ffffff;font-weight:700;cursor:pointer;">⟳ Re-scan</button>
         </div>
         ${res.sections.map((sec) => {
           const isChecked = !saved.length || saved.includes(String(sec.key)) || saved.includes(sec.title);
@@ -483,28 +516,6 @@ async function loadPlexLibraries(showToast = false) {
     if (discoverBtn) { discoverBtn.disabled = false; }
     const curRescan = document.getElementById('btnRescanPlex');
     if (curRescan) { curRescan.disabled = false; curRescan.textContent = '⟳ Re-scan'; }
-  }
-}
-
-async function loadArrOptions(service) {
-  const profileSel = document.getElementById('qp-' + service) || document.getElementById(service + 'Profile');
-  const rootSel = document.getElementById('rf-' + service) || document.getElementById(service + 'Root');
-  if (!profileSel && !rootSel) return;
-  try {
-    const [profiles, roots] = await Promise.all([
-      fetch('/api/settings/arr/' + service + '/profiles', { headers: authHeaders() }).then((r) => r.json()),
-      fetch('/api/settings/arr/' + service + '/rootfolders', { headers: authHeaders() }).then((r) => r.json())
-    ]);
-    if (Array.isArray(profiles) && profiles.length && profileSel) {
-      const cur = current.services[service]?.qualityProfileId;
-      profileSel.innerHTML = profiles.map((p) => `<option value="${p.id}" ${Number(p.id) === Number(cur) ? 'selected' : ''}>${p.name}</option>`).join('');
-    }
-    if (Array.isArray(roots) && roots.length && rootSel) {
-      const cur = current.services[service]?.rootFolder || current.services[service]?.rootFolderPath;
-      rootSel.innerHTML = roots.map((r) => `<option value="${r.path}" ${r.path === cur ? 'selected' : ''}>${r.path}</option>`).join('');
-    }
-  } catch (err) {
-    console.warn('[settings] loadArrOptions failed for ' + service, err);
   }
 }
 
