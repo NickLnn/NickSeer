@@ -1,6 +1,6 @@
 # NickSeer 🎬
 
-A modern, self-hosted discovery hub and request manager for **Plex** & **Jellyfin** — featuring personalized recommendations, Box Office charts, AI taste curation, live streaming activity, and seamless one-click requests to **Radarr** & **Sonarr**, wrapped in a sleek Netflix/Apple-inspired UI.
+A modern, self-hosted discovery hub and request manager for **Plex** & **Jellyfin** — featuring personalized recommendations, Box Office charts, AI taste curation, live streaming activity, and seamless one-click requests to **Radarr** & **Sonarr**, wrapped in a sleek Netflix/Apple-inspired UI. Kudos to Seerr Team for the inspiration 
 
 > 🔒 **Security Notice:** This repository contains **NO personal data, tokens, or API keys**. All credentials (Plex, TMDB, Radarr, Sonarr, Tautulli, SABnzbd, etc.) are entered interactively in the web UI upon first launch and saved exclusively to your local `./config/` directory — never in this repository or Docker image.
 
