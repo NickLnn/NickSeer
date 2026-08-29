@@ -41,3 +41,11 @@ Thumbs.db
 
 patch note/
 patch note/**
+
+# AI and IDE Artifacts
+AGENTS.md
+GEMINI.md
+.agents/
+.vs/
+*.sqlite
+_backup_*.js
