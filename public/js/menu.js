@@ -1,3 +1,4 @@
+import { escHTML } from './util.js';
 // menu.js — profile dropdown on the top-bar avatar.
 // Always shows: current user, Switch profile, Settings, "Sign in with Plex"
 // (tester for the OAuth flow), and Log out. Self-contained; re-binds the avatar
@@ -92,8 +93,8 @@ async function startPlexLogin() {
   let data;
   try {
     data = await fetch('/api/auth/plex/pin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ forwardUrl: location.origin }) }).then((r) => r.json());
-  } catch (e) { modal.querySelector('.box').innerHTML = `<h3>Failed</h3><p>${e.message}</p>`; return; }
-  if (!data.ok) { modal.querySelector('.box').innerHTML = `<h3>Failed</h3><p>${data.error || 'could not create PIN'}</p><button class="btn2 cx" onclick="document.getElementById('plexModal').classList.add('hidden')">Close</button>`; return; }
+  } catch (e) { modal.querySelector('.box').innerHTML = `<h3>Failed</h3><p>${escHTML(e.message)}</p>`; return; }
+  if (!data.ok) { modal.querySelector('.box').innerHTML = `<h3>Failed</h3><p>${escHTML(data.error || 'could not create PIN')}</p><button class="btn2 cx" onclick="document.getElementById('plexModal').classList.add('hidden')">Close</button>`; return; }
 
   const win = window.open(data.authUrl, '_blank', 'width=800,height=720');
   modal.querySelector('.box').innerHTML = `
@@ -116,7 +117,7 @@ async function startPlexLogin() {
         localStorage.setItem('nickseer_token', r.token);
         localStorage.removeItem('nickseer_profile');
         try { if (win) win.close(); } catch { /* ignore */ }
-        modal.querySelector('.box').innerHTML = `<h3>✓ Signed in</h3><p>Welcome, ${r.user.username}${r.user.role === 'admin' ? ' (admin)' : ''}. Reloading…</p>`;
+        modal.querySelector('.box').innerHTML = `<h3>✓ Signed in</h3><p>Welcome, ${escHTML(r.user.username)}${r.user.role === 'admin' ? ' (admin)' : ''}. Reloading…</p>`;
         setTimeout(() => location.reload(), 900);
         return;
       }
@@ -128,3 +129,4 @@ async function startPlexLogin() {
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(build, 300));
 else setTimeout(build, 300);
+

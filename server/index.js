@@ -77,11 +77,36 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
 
 load();
-const server = app.listen(PORT, () => console.log(`NickSeer running on http://0.0.0.0:${PORT} (routers: ${[
+const server = app.listen(PORT, () => {
+  console.log(`NickSeer running on http://0.0.0.0:${PORT} (routers: ${[
   authRouter && 'auth', authRolesRouter && 'auth-roles', publicRouter && 'public', settingsRouter && 'settings', discoverRouter && 'discover',
   statusRouter && 'status', requestRouter && 'request', healthRouter && 'health-detail', requestsRouter && 'requests'
-].filter(Boolean).join(', ')})`));
+].filter(Boolean).join(', ')} )`);
 
+  // Pre-warm caches in the background (non-blocking)
+  setTimeout(async () => {
+    try {
+      const plex = await import('./services/plex.js');
+      const plexSvc = plex.default || plex;
+      if (plexSvc.libraryMap) {
+        console.log('[boot] pre-warming Plex library cache...');
+        await plexSvc.libraryMap();
+        console.log('[boot] Plex cache warm.');
+      }
+    } catch (e) { console.log('[boot] Plex pre-warm skipped:', e.message); }
+
+    try {
+      const tmdb = await import('./services/tmdb.js');
+      const tmdbSvc = tmdb.default || tmdb;
+      if (tmdbSvc.trending) {
+        console.log('[boot] pre-warming TMDB trending...');
+        await tmdbSvc.trending('movie', 'week');
+        await tmdbSvc.trending('tv', 'week');
+        console.log('[boot] TMDB trending cache warm.');
+      }
+    } catch (e) { console.log('[boot] TMDB pre-warm skipped:', e.message); }
+  }, 2000);
+});
 // Graceful shutdown handling for Docker / systemd
 function handleShutdown(signal) {
   console.log(`[server] received ${signal}, closing gracefully...`);

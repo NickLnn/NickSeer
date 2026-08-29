@@ -1,3 +1,4 @@
+import { escHTML } from './util.js';
 // aisuggest.js — dedicated "AI Suggestions" tab. Subtitle now reflects the REAL
 // history window returned by the API (fixes the hardcoded "30 days"). Cards use
 // the standard .card markup so imdb-badge.js adds IMDb ratings here too.
@@ -47,14 +48,20 @@ async function openDetail(item) {
   const bk = document.getElementById('modalBackdrop'); if (bk) bk.onclick = () => modal.classList.add('hidden');
   const media = item.media === 'show' ? 'tv' : (item.media || 'movie');
   const d = await api(`/api/discover/${media}/${item.id}`);
-  if (d.error) { cardEl.innerHTML = `<div style="padding:40px">${d.error}</div>`; return; }
+  if (d.error) { cardEl.innerHTML = `<div style="padding:40px">${escHTML(d.error)}</div>`; return; }
   const imdbBadge = d.imdbRating ? `<span class="imdb-badge"><span class="imdb-logo">IMDb</span><span class="imdb-score"><b>${d.imdbRating.toFixed(1)}</b>/10</span></span>` : '';
   const ytBtn = d.trailerKey ? `<a class="btn btn-ghost btn-yt" data-nav target="_blank" href="https://www.youtube.com/watch?v=${d.trailerKey}">YouTube</a>` : '';
   const imdbBtn = d.imdbUrl ? `<a class="btn btn-imdb" data-nav target="_blank" rel="noopener" href="${d.imdbUrl}">IMDb ↗</a>` : '';
   const hero = d.trailerKey ? `<div class="modal-video"><iframe src="https://www.youtube.com/embed/${d.trailerKey}?rel=0&modestbranding=1" allow="encrypted-media; picture-in-picture" allowfullscreen></iframe></div>` : `<div class="modal-hero" style="background-image:url(${d.backdrop || ''})"></div>`;
   
   let ownBadgesHtml = '';
-  if (d.inLibrary) ownBadgesHtml += '<span class="own-pill in-lib" title="In your Plex library"><span class="own-tick">✓</span>In library</span>';
+    if (d.inLibrary) {
+    if (d.plexUrl) {
+      ownBadgesHtml += `<a class="own-pill in-lib interactive-lib-pill" href="${d.plexUrl}" target="_blank" rel="noopener noreferrer" title="Open in Plex"><span class="own-tick">✓</span>In library <span style="font-size:11px;opacity:0.85;margin-left:3px;">↗</span></a>`;
+    } else {
+      ownBadgesHtml += '<span class="own-pill in-lib" title="In your Plex library"><span class="own-tick">✓</span>In library</span>';
+    }
+  }
   if (media === 'tv' && d.seriesStatus) ownBadgesHtml += '<span class="own-pill ' + (d.seriesStatus === 'ended' ? 'ended' : 'cont') + '">' + (d.seriesStatus === 'ended' ? '■ Ended' : '● Continuing') + '</span>';
   
   cardEl.innerHTML = `<button class="modal-close" data-nav onclick="document.getElementById('modal').classList.add('hidden')">✕</button>${hero}<div class="modal-body">
@@ -106,3 +113,5 @@ function init() {
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(init, 300));
 else setTimeout(init, 300);
+
+

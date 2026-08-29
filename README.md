@@ -30,7 +30,7 @@ A modern, self-hosted discovery hub and request manager for **Plex** & **Jellyfi
 
 ### 👥 5. Netflix-Style Multi-User Profiles & RBAC
 - **"Who's Watching?" Profile Picker:** Switch between family profiles seamlessly.
-- **Role-Based Access Control (RBAC):** Admin users manage users, approvals, and server settings. Standard user accounts (family/friends) are automatically restricted from viewing backend configurations or server hostnames.
+- **Role-Based Access Control (RBAC):** Admin users manage users, approvals, and server settings. Standard user accounts (family/friends) are automatically restricted from viewing backend configurations, server hostnames, or other users' request history.
 - **Sign in with Plex:** One-click Plex OAuth authentication that auto-provisions user profiles.
 
 ### 📥 6. Request Management & Approvals Workflow

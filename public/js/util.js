@@ -60,3 +60,12 @@ export async function api(path, opts = {}) {
 }
 
 export function stars(v) { return v ? `★ ${Number(v).toFixed(1)}` : ''; }
+
+export function escHTML(str) {
+  if (str == null) return '';
+  return String(str).replace(/[&<>'\"/]/g, (match) => {
+    const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;', '/': '&#x2F;' };
+    return map[match];
+  });
+}
+

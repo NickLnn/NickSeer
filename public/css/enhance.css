@@ -2482,3 +2482,22 @@ body {
   border-color: rgba(239, 68, 68, 0.4) !important;
   color: #f87171 !important;
 }
+
+/* Interactive In Library Pill */
+.own-pill.in-lib.interactive-lib-pill {
+  cursor: pointer;
+  text-decoration: none !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: inline-flex;
+  align-items: center;
+}
+.own-pill.in-lib.interactive-lib-pill:hover {
+  background: rgba(53, 208, 127, 0.28) !important;
+  border-color: rgba(53, 208, 127, 0.85) !important;
+  color: #a7f3d0 !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(53, 208, 127, 0.35);
+}
+.own-pill.in-lib.interactive-lib-pill:active {
+  transform: translateY(0);
+}

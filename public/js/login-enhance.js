@@ -1,3 +1,4 @@
+import { escHTML } from './util.js';
 // login-enhance.js — Aegean Login Overlay with Netflix-Style Dynamic Trending Wallpaper.
 // Client-side auth handler
 
@@ -148,7 +149,7 @@ async function plexOAuthFlow(expectedUsername, onOk, onErr) {
       const r = JSON.parse(text);
       if (r.ok && !r.pending && r.token) {
         if (expectedUsername && r.user.username.toLowerCase() !== expectedUsername.toLowerCase()) {
-          onErr(`Signed in to Plex as "${r.user.username}", not "${expectedUsername}". Approve with the right Plex account and try again.`);
+          onErr(`Signed in to Plex as "${escHTML(r.user.username)}", not "${expectedUsername}". Approve with the right Plex account and try again.`);
           try { if (win) win.close(); } catch { /* ignore */ }
           return;
         }

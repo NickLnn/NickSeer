@@ -177,10 +177,10 @@ function serveStatic(root, req, res, mountPath, pathname) {
     res.setHeader('Content-Type', MIME[ext] || 'application/octet-stream');
     
     // Cloudflare Edge & Browser Caching Policy
-    if (ext === '.html') {
+    if (ext === '.html' || ext === '.js' || ext === '.css') {
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     } else {
-      // 24-hour browser caching with 1-hour stale-while-revalidate for static assets
+      // 24-hour browser caching for static images, SVGs, and fonts
       res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=3600');
     }
     
@@ -196,3 +196,4 @@ express.static = (root) => { const mw = () => {}; mw._static = true; mw._root = 
 
 export default express;
 export { Router };
+

@@ -1,3 +1,45 @@
+// Intelligent IMDb Prefetcher
+window.imdbCache = window.imdbCache || {};
+const imdbPrefetchQueue = new Map();
+let imdbPrefetchTimer = null;
+
+window.imdbObserver = new IntersectionObserver((entries) => {
+  let needsFetch = false;
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      const el = entry.target;
+      const id = el.dataset.id;
+      const media = el.dataset.media;
+      if (id && media && !window.imdbCache[id]) {
+        imdbPrefetchQueue.set(id, { id, media });
+        needsFetch = true;
+        window.imdbObserver.unobserve(el);
+      }
+    }
+  });
+
+  if (needsFetch && !imdbPrefetchTimer) {
+    imdbPrefetchTimer = setTimeout(() => {
+      const items = Array.from(imdbPrefetchQueue.values());
+      imdbPrefetchQueue.clear();
+      imdbPrefetchTimer = null;
+      if (!items.length) return;
+      
+      fetch('/api/discover/imdb-ratings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: items.slice(0, 30) })
+      }).then(r => r.json()).then(r => {
+        if (r && r.ratings) Object.assign(window.imdbCache, r.ratings);
+      }).catch(()=>{});
+    }, 1500);
+  }
+}, { rootMargin: '250px' });
+document.addEventListener('click', (e) => {
+  if (e.target.closest('button, .card, .nav-link, .bottom-nav-item, .drawer-item, .tag-chip, .appr-subtab, .appr-btn, .icon-btn')) {
+    if (navigator.vibrate) navigator.vibrate(40);
+  }
+});
 // NickSeer main app — login, multi-user profiles, brand-logo row titles,
 // detail ownership badges (in-library ✓, series status, episode-% ring),
 // hero slideshow, all discovery views, box office (worldwide total),
@@ -12,7 +54,7 @@
 //  2) Search no longer steals focus onto the first result while you're still
 //     typing/paused (was causing an unwanted "jump" on desktop AND mobile).
 //     Focus into results now only happens on an intentional ArrowDown/Enter.
-import { toast, el, api, stars, authToken } from './util.js';
+import { toast, el, api, stars, authToken , escHTML} from './util.js';
 import { openSettings } from './settings.js';
 import { setFocus } from './nav.js';
 const app = document.getElementById('app');
@@ -208,9 +250,9 @@ async function chooseProfile(force = false) {
 function injectStyles() {
   if (document.getElementById('profile-styles')) return;
   const css = `
-  .profile-overlay{position:fixed;inset:0;z-index:110;display:grid;place-items:center;background:radial-gradient(ellipse at 50% 25%, rgba(30,136,199,0.25) 0%, rgba(6,18,32,0.95) 50%, #030a14 100%);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);}
+  .profile-overlay{position:fixed;inset:0;z-index:110;display:block;overflow-y:auto;padding:8vh 0 40px;background:radial-gradient(ellipse at 50% 25%, rgba(30,136,199,0.25) 0%, rgba(6,18,32,0.95) 50%, #030a14 100%);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);}
   .profile-overlay.hidden{display:none;}
-  .profile-inner{text-align:center;padding:20px;max-width:92vw;}
+  .profile-inner{text-align:center;padding:20px;max-width:92vw;margin:0 auto;min-height:min-content;}
   .profile-h1{font-size:38px;font-weight:900;margin:0 0 32px;color:#f0f7ff;letter-spacing:-.02em;text-shadow:0 2px 10px rgba(0,0,0,.5);}
   .profile-grid{display:flex;gap:24px;flex-wrap:wrap;justify-content:center;max-width:880px;margin:0 auto;}
   .profile-tile{background:transparent;border:0;display:flex;flex-direction:column;align-items:center;gap:12px;cursor:pointer;outline:none;}
@@ -257,8 +299,22 @@ async function afterAuth() {
   if (!getProfile()) {
     await chooseProfile(false);
   } else {
-    showView('home');
+    const initialView = getInitialView();
+    showView(initialView);
   }
+}
+
+function getInitialView() {
+  const hash = (location.hash || '').replace(/^#\/?/, '').toLowerCase().trim();
+  const validViews = ['home', 'movies', 'shows', 'streaming', 'new', 'boxoffice', 'coming', 'status', 'info', 'live', 'requests'];
+  if (hash && validViews.includes(hash)) return hash;
+  
+  try {
+    const saved = sessionStorage.getItem('ns_active_view') || localStorage.getItem('ns_active_view');
+    if (saved && validViews.includes(saved.toLowerCase())) return saved.toLowerCase();
+  } catch {}
+  
+  return 'home';
 }
 
 document.addEventListener('settings:saved', () => { rowsCache = null; showView(currentView); });
@@ -285,6 +341,20 @@ search.addEventListener('keydown', (e) => {
   }
 });
 // Topbar, Bottom nav, and Mobile Drawer sync
+// Pre-highlight initial active tab immediately from URL hash or localStorage
+try {
+  const earlyHash = (location.hash || '').replace(/^#\/?/, '').toLowerCase().trim();
+  const earlySaved = sessionStorage.getItem('ns_active_view') || localStorage.getItem('ns_active_view') || '';
+  const earlyView = earlyHash || earlySaved;
+  const validViews = ['home', 'movies', 'shows', 'ai', 'streaming', 'new', 'boxoffice', 'coming', 'status', 'info', 'live', 'requests'];
+  if (earlyView && validViews.includes(earlyView) && earlyView !== 'home') {
+    document.querySelectorAll('.nav-link, .bottom-nav-item, .drawer-item').forEach((n) => {
+      if (n.dataset.view === earlyView) n.classList.add('active');
+      else if (n.dataset.view) n.classList.remove('active');
+    });
+  }
+} catch {}
+
 function setupNavigation() {
   const drawer = document.getElementById('drawerOverlay');
   const openDrawer = () => drawer?.classList.remove('hidden');
@@ -330,7 +400,7 @@ export async function updateRoleVisibility() {
   }
   
   // Admin-only navigation views
-  const adminViews = ['info', 'live', 'requests'];
+  const adminViews = ['info', 'live'];
   document.querySelectorAll('.nav-link, .drawer-item, .bottom-nav-item').forEach((el) => {
     const v = el.dataset.view;
     if (adminViews.includes(v)) {
@@ -354,12 +424,25 @@ async function showView(view, force = false) {
       return;
     }
   }
-  currentView = view; stopSlideshow(); app.innerHTML = skeleton();
-  // Sync active states on top and bottom navigation bars
-  document.querySelectorAll('.nav-link, .bottom-nav-item').forEach((n) => {
+  currentView = view;
+  stopSlideshow();
+  app.innerHTML = skeleton();
+
+  // Remember active view across refreshes & update URL hash seamlessly
+  try {
+    sessionStorage.setItem('ns_active_view', view);
+    localStorage.setItem('ns_active_view', view);
+    if (location.hash.replace(/^#\/?/, '').toLowerCase() !== view) {
+      history.replaceState(null, '', '#' + view);
+    }
+  } catch {}
+
+  // Sync active states on top, drawer, and bottom navigation bars
+  document.querySelectorAll('.nav-link, .bottom-nav-item, .drawer-item').forEach((n) => {
     if (n.dataset.view === view) n.classList.add('active');
     else if (n.dataset.view) n.classList.remove('active');
   });
+
   try {
     if (view === 'home') await renderHome(force);
     else if (view === 'movies') await renderCategory('movie', force);
@@ -369,8 +452,19 @@ async function showView(view, force = false) {
     else if (view === 'boxoffice') await renderBoxOffice(force);
     else if (view === 'coming') await renderComing(force);
     else if (view === 'status') await renderStatus();
-  } catch (e) { app.innerHTML = ''; app.appendChild(emptyState('Something went wrong', e.message)); }
+  } catch (e) {
+    app.innerHTML = '';
+    app.appendChild(emptyState('Something went wrong', e.message));
+  }
 }
+
+window.addEventListener('hashchange', () => {
+  const currentHash = (location.hash || '').replace(/^#\/?/, '').toLowerCase().trim();
+  const validViews = ['home', 'movies', 'shows', 'streaming', 'new', 'boxoffice', 'coming', 'status', 'info', 'live', 'requests'];
+  if (currentHash && validViews.includes(currentHash) && currentHash !== currentView) {
+    showView(currentHash, false);
+  }
+});
 async function getRows(force) { if (rowsCache && !force) return rowsCache; rowsCache = await api('/api/discover/rows' + (force ? '?refresh=1' : '')); return rowsCache; }
 async function renderHome(force) {
   try {
@@ -392,25 +486,31 @@ async function renderHome(force) {
       app.appendChild(rowSub("No watch history yet — showing trending & charts. Watch a few things in Plex and Home becomes personal."));
     }
 
-    // Render personalized rows first
-    for (const row of persoRows) {
-      if (row && row.items && row.items.length) {
-        app.appendChild(rowEl(row.title, row.items, row.title.startsWith('Picked')));
+          // Staggered render for rows
+      const fns = [];
+      for (const row of persoRows) {
+        if (row && row.items && row.items.length) fns.push(() => rowEl(row.title, row.items, row.title.startsWith('Picked')));
       }
-    }
-
-    // Render curated global rows
-    for (const row of curatedRows) {
-      if (row && row.items && row.items.length) {
-        app.appendChild(rowEl(row.title, row.items, false, isTop(row.title), row.brand));
+      const nonStreamingCuratedRows = curatedRows.filter(r => !isTop(r.title) && !r.brand);
+      for (const row of nonStreamingCuratedRows) {
+        if (row && row.items && row.items.length) fns.push(() => rowEl(row.title, row.items, false, false, row.brand));
       }
-    }
+      
+      const renderChunk = (start, count) => {
+        const chunk = fns.slice(start, start + count);
+        if (!chunk.length) return;
+        for (const fn of chunk) app.appendChild(fn());
+        if (start + count < fns.length) {
+          requestAnimationFrame(() => setTimeout(() => renderChunk(start + count, count), 20));
+        }
+      };
+      renderChunk(0, 3);
+      
+      if (!persoRows.length && !nonStreamingCuratedRows.length) {
+        app.appendChild(emptyState('Discover Media', 'Loading library rows... Tap Refresh if content does not appear.', true));
+      }
 
-    if (!persoRows.length && !curatedRows.length) {
-      app.appendChild(emptyState('Discover Media', 'Loading library rows... Tap Refresh if content does not appear.', true));
-    }
-
-    focusFirstCard();
+      focusFirstCard();
   } catch (err) {
     console.error('[home] renderHome error:', err);
     app.innerHTML = '';
@@ -505,7 +605,7 @@ async function renderCollectionsContent(container, force) {
   const data = await api(`/api/discover/collections${force ? '?refresh=1' : ''}`);
 
   if (data.error || !data.all || !data.all.length) {
-    colBox.innerHTML = `<div class="empty-state"><h3>No collections found</h3><p>${data.error || 'Ensure TMDB API key is configured.'}</p></div>`;
+    colBox.innerHTML = `<div class="empty-state"><h3>No collections found</h3><p>${escHTML(data.error || 'Ensure TMDB API key is configured.')}</p></div>`;
     return;
   }
 
@@ -594,7 +694,14 @@ async function renderStreaming(force) {
   const streamRows = (curated.rows || []).filter((r) => isTop(r.title));
   if (!streamRows.length) { app.appendChild(emptyState('No streaming charts yet', curated.error || 'Add your TMDB key and region in Settings.', true)); return; }
   if ((streamRows[0]?.items || []).slice(0, 7).length) app.appendChild(heroSlideshow(streamRows[0].items.slice(0, 7)));
-  for (const row of streamRows) app.appendChild(rowEl(row.title, row.items, false, true, row.brand));
+      const fns = [];
+    for (const row of streamRows) fns.push(() => rowEl(row.title, row.items, false, true, row.brand));
+    const renderChunk = (start, count) => {
+      const chunk = fns.slice(start, start + count);
+      for (const fn of chunk) app.appendChild(fn());
+      if (start + count < fns.length) requestAnimationFrame(() => setTimeout(() => renderChunk(start + count, count), 20));
+    };
+    renderChunk(0, 3);
   focusFirstCard();
 }
 async function renderNew(force) {
@@ -605,7 +712,14 @@ async function renderNew(force) {
   const rows = data.rows || [];
   if (!rows.length) { app.appendChild(emptyState('Nothing new found', data.error || 'Add your TMDB key and region in Settings.', true)); return; }
   if ((rows[0]?.items || []).slice(0, 7).length) app.appendChild(heroSlideshow(rows[0].items.slice(0, 7)));
-  for (const row of rows) app.appendChild(rowEl(row.title, row.items, false, false, row.brand));
+      const fns = [];
+    for (const row of rows) fns.push(() => rowEl(row.title, row.items, false, false, row.brand));
+    const renderChunk = (start, count) => {
+      const chunk = fns.slice(start, start + count);
+      for (const fn of chunk) app.appendChild(fn());
+      if (start + count < fns.length) requestAnimationFrame(() => setTimeout(() => renderChunk(start + count, count), 20));
+    };
+    renderChunk(0, 3);
   focusFirstCard();
 }
 async function renderBoxOffice(force) {
@@ -626,9 +740,14 @@ async function renderBoxOffice(force) {
   focusFirstCard();
 }
 function boxOfficeCard(it, rank) {
-  const c = el('div', { class: 'card', tabindex: '0', 'data-nav': '' });
-  c.addEventListener('click', () => openDetail(it));
-  if (it.poster) c.appendChild(el('img', { class: 'card-poster', src: it.poster, loading: 'lazy', alt: it.title }));
+      const c = el('div', { class: 'card', tabindex: '0', 'data-nav': '' });
+    if (it.id) {
+      c.dataset.id = it.id;
+      c.dataset.media = 'movie';
+      if (window.imdbObserver) window.imdbObserver.observe(c);
+    }
+    c.addEventListener('click', () => openDetail(it));
+  if (it.poster) c.appendChild(el('img', { class: 'card-poster', src: it.poster, loading: 'lazy', alt: it.title, onload: (e) => e.target.classList.add('fade-in') }));
   else c.appendChild(el('div', { class: 'card-fallback' }, it.title || 'No image'));
   c.appendChild(el('div', { class: 'card-rank' }, String(rank)));
   if (it.weekend) c.appendChild(el('div', { class: 'card-badge', style: 'left:8px;right:auto;top:8px;background:rgba(53,208,127,.92);color:#03150b;font-size:12px' }, it.weekend));
@@ -645,7 +764,14 @@ async function renderComing(force) {
   const rows = data.rows || [];
   if (!rows.length) { app.appendChild(emptyState('Nothing upcoming yet', data.error || 'Add your TMDB key and region in Settings.', true)); return; }
   if ((rows[0]?.items || []).slice(0, 7).length) app.appendChild(heroSlideshow(rows[0].items.slice(0, 7)));
-  for (const row of rows) app.appendChild(rowEl(row.title, row.items, false, false, row.brand));
+      const fns = [];
+    for (const row of rows) fns.push(() => rowEl(row.title, row.items, false, false, row.brand));
+    const renderChunk = (start, count) => {
+      const chunk = fns.slice(start, start + count);
+      for (const fn of chunk) app.appendChild(fn());
+      if (start + count < fns.length) requestAnimationFrame(() => setTimeout(() => renderChunk(start + count, count), 20));
+    };
+    renderChunk(0, 3);
   focusFirstCard();
 }
 async function runSearch(q) {
@@ -655,7 +781,7 @@ async function runSearch(q) {
   if (!Array.isArray(results) || !results.length) { app.appendChild(emptyState('No results for "' + q + '"', 'Try another title or keyword.')); return; }
   const wrap = el('div', { class: 'search-results-wrap' });
   wrap.appendChild(el('div', { class: 'search-results-head' }, [
-    el('div', { class: 'row-title' }, `Results for "${q}"`),
+    el('div', { class: 'row-title' }, `Results for "${escHTML(q)}"`),
     el('div', { class: 'row-sub' }, `${results.length} titles found`)
   ]));
   const grid = el('div', { class: 'search-results-grid' });
@@ -666,14 +792,14 @@ async function runSearch(q) {
 async function renderStatus() {
   const s = await api('/api/status');
   app.innerHTML = '';
-  app.appendChild(el('div', { class: 'row-head' }, [el('div', { class: 'row-title' }, 'Downloads & Health')]));
+  app.appendChild(el('div', { class: 'row-head' }, [el('div', { class: 'row-title' }, 'Downloads')]));
   const grid = el('div', { class: 'status-grid' });
   if (s.gluetun) {
     const g = s.gluetun; const ok = !g.error && (g.vpn === 'running' || g.ip);
     const c = el('div', { class: 'status-card', 'data-nav': '', tabindex: '0' });
     c.appendChild(el('div', { class: 'status-head' }, [el('span', { class: 'status-dot ' + (ok ? 'ok' : 'bad') }), el('span', { class: 'status-name' }, 'Gluetun VPN'), el('span', { class: 'status-sub' }, g.ip || '')]));
     if (g.error) c.appendChild(el('div', { class: 'row-sub' }, g.error));
-    else { c.appendChild(el('div', { class: 'vpn-line' }, [el('span', { class: 'vpn-pill' }, ok ? '● Protected' : '● Unknown'), el('span', {}, g.country ? `${g.city ? g.city + ', ' : ''}${g.country}` : 'VPN tunnel active')])); c.appendChild(el('div', { class: 'row-sub', style: 'margin-top:8px' }, 'All download traffic is routed through the VPN.')); }
+    else { c.appendChild(el('div', { class: 'vpn-line' }, [el('span', { class: 'vpn-pill' }, ok ? '✓ Protected' : '? Unknown'), el('span', {}, g.country ? `${g.city ? g.city + ', ' : ''}${g.country}` : 'VPN tunnel active')])); c.appendChild(el('div', { class: 'row-sub', style: 'margin-top:8px' }, 'All download traffic is routed through the VPN.')); }
     grid.appendChild(c);
   }
   if (s.sabnzbd) {
@@ -683,16 +809,7 @@ async function renderStatus() {
     else { c.appendChild(el('div', { class: 'speed-big' }, [document.createTextNode(q.totalSpeed || (q.speed ? q.speed + 'B/s' : '0 KB/s')), el('small', {}, 'total download speed')])); (q.slots || []).slice(0, 12).forEach((sl) => c.appendChild(downloadRow(sl.name, sl.percent, sl.timeLeft))); if (!(q.slots || []).length) c.appendChild(el('div', { class: 'row-sub' }, 'Idle — queue empty.')); }
     grid.appendChild(c);
   }
-  for (const kind of ['radarr', 'sonarr']) {
-    if (s[kind]) {
-      const q = s[kind]; const c = el('div', { class: 'status-card', 'data-nav': '', tabindex: '0' });
-      c.appendChild(el('div', { class: 'status-head' }, [el('span', { class: 'status-dot ' + (q.error ? 'bad' : 'ok') }), el('span', { class: 'status-name' }, cap(kind)), el('span', { class: 'status-sub' }, q.error ? '' : `${q.count || 0} items`)]));
-      if (q.error) c.appendChild(el('div', { class: 'row-sub' }, q.error));
-      else { (q.items || []).forEach((it) => c.appendChild(downloadRow(it.title, it.progress, it.timeLeft))); if (!(q.items || []).length) c.appendChild(el('div', { class: 'row-sub' }, 'Idle — nothing importing.')); }
-      grid.appendChild(c);
-    }
-  }
-  if (!grid.children.length) { app.appendChild(emptyState('No services connected', 'Add SABnzbd, Radarr, Sonarr or Gluetun in Settings.', true)); return; }
+  if (!grid.children.length) { app.appendChild(emptyState('No download services connected', 'Configure SABnzbd or Gluetun in Settings.', true)); return; }
   app.appendChild(grid); focusFirstCard();
 }
 function tabHeader(title, media, onSwitch) {
@@ -748,9 +865,14 @@ function rowEl(title, items, isPicked, ranked, brand) {
 }
 function rowSub(text) { return el('div', { class: 'row-sub', style: 'padding:0 40px 4px' }, text); }
 function card(item, rank) {
-  const c = el('div', { class: 'card', tabindex: '0', 'data-nav': '' });
-  c.addEventListener('click', () => openDetail(item));
-  if (item.poster) c.appendChild(el('img', { class: 'card-poster', src: item.poster, loading: 'lazy', alt: item.title }));
+      const c = el('div', { class: 'card', tabindex: '0', 'data-nav': '' });
+    if (item.id) {
+      c.dataset.id = item.id;
+      c.dataset.media = item.media === 'tv' || item.media === 'show' || item.first_air_date ? 'tv' : 'movie';
+      if (window.imdbObserver) window.imdbObserver.observe(c);
+    }
+    c.addEventListener('click', () => openDetail(item));
+  if (item.poster) c.appendChild(el('img', { class: 'card-poster', src: item.poster, loading: 'lazy', alt: item.title, onload: (e) => e.target.classList.add('fade-in') }));
   else c.appendChild(el('div', { class: 'card-fallback' }, item.title || 'No image'));
   if (item.rating) c.appendChild(el('div', { class: 'card-badge' }, stars(item.rating)));
   if (rank) c.appendChild(el('div', { class: 'card-rank' }, String(rank)));
@@ -779,7 +901,7 @@ async function openDetail(item) {
   const media = item.media === 'show' ? 'tv' : item.media || 'movie';
   if (!item.id) { cardEl.innerHTML = `<div style="padding:40px">No TMDB match for "${item.title}".</div>`; return; }
   const d = await api(`/api/discover/${media}/${item.id}`);
-  if (d.error) { cardEl.innerHTML = `<div style="padding:40px">${d.error}</div>`; return; }
+  if (d.error) { cardEl.innerHTML = `<div style="padding:40px">${escHTML(d.error)}</div>`; return; }
   setAmbient(d.backdrop);
   const media_label = media === 'tv' ? 'TV' : 'Movie';
   cardEl.innerHTML = '';
@@ -788,7 +910,24 @@ async function openDetail(item) {
   else { const mh = el('div', { class: 'modal-hero' }); if (d.backdrop) mh.style.backgroundImage = `url(${d.backdrop})`; cardEl.appendChild(mh); }
   // Title row + ownership badges (✓ in library, series status, streaming brand logo).
   const ownBadges = el('div', { class: 'own-badges' });
-  if (d.inLibrary) ownBadges.appendChild(el('span', { class: 'own-pill in-lib', title: 'In your Plex library' }, [el('span', { class: 'own-tick' }, '✓'), 'In library']));
+  if (d.inLibrary) {
+    if (d.plexUrl) {
+      const libLink = el('a', {
+        class: 'own-pill in-lib interactive-lib-pill',
+        title: 'Open in Plex Web',
+        href: d.plexUrl,
+        target: '_blank',
+        rel: 'noopener noreferrer'
+      }, [
+        el('span', { class: 'own-tick' }, '✓'),
+        'In library',
+        el('span', { class: 'lib-ext-icon', style: 'font-size:11px;opacity:0.85;margin-left:3px;' }, '↗')
+      ]);
+      ownBadges.appendChild(libLink);
+    } else {
+      ownBadges.appendChild(el('span', { class: 'own-pill in-lib', title: 'In your Plex library' }, [el('span', { class: 'own-tick' }, '✓'), 'In library']));
+    }
+  }
   if (media === 'tv' && d.seriesStatus) ownBadges.appendChild(el('span', { class: 'own-pill ' + (d.seriesStatus === 'ended' ? 'ended' : 'cont') }, d.seriesStatus === 'ended' ? '■ Ended' : '● Continuing'));
   if (d.streamingService && window.renderStreamPill) {
     const sp = window.renderStreamPill(d.streamingService);
@@ -802,7 +941,23 @@ async function openDetail(item) {
     el('span', { class: 'chip' }, media_label),
     ...(d.genres || []).slice(0, 3).map((g) => el('span', { class: 'chip' }, g))
   ]);
-  if (d.imdbRating) meta.appendChild(el('span', { class: 'imdb-badge' }, [el('span', { class: 'imdb-logo' }, 'IMDb'), el('span', { class: 'imdb-score', html: `<b>${d.imdbRating.toFixed(1)}</b>/10` }), d.imdbVotes ? el('span', { class: 'imdb-votes' }, d.imdbVotes) : null]));
+      if (d.imdbRating) {
+      meta.appendChild(el('span', { class: 'imdb-badge' }, [el('span', { class: 'imdb-logo' }, 'IMDb'), el('span', { class: 'imdb-score', html: `<b>${d.imdbRating.toFixed(1)}</b>/10` }), d.imdbVotes ? el('span', { class: 'imdb-votes' }, d.imdbVotes) : null]));
+    } else if (d.imdbUrl) {
+      const badge = el('span', { class: 'imdb-badge' }, [el('span', { class: 'imdb-logo' }, 'IMDb'), el('span', { class: 'imdb-score' }, '...')]);
+      meta.appendChild(badge);
+      if (window.imdbCache && window.imdbCache[d.id]) {
+        badge.querySelector('.imdb-score').innerHTML = `<b>${Number(window.imdbCache[d.id]).toFixed(1)}</b>/10`;
+      } else {
+        fetch('/api/discover/imdb-ratings', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ items: [{ id: d.id, media }] }) })
+        .then(r => r.json()).then(r => {
+          if (r && r.ratings && r.ratings[d.id]) {
+            badge.querySelector('.imdb-score').innerHTML = `<b>${Number(r.ratings[d.id]).toFixed(1)}</b>/10`;
+            if (window.imdbCache) window.imdbCache[d.id] = r.ratings[d.id];
+          } else badge.remove();
+        }).catch(() => badge.remove());
+      }
+    }
   // Episode-% ring right after the IMDb badge (TV only, when owned).
   if (media === 'tv' && d.episodePercent != null) {
     const full = d.episodePercent >= 100;
@@ -812,8 +967,16 @@ async function openDetail(item) {
     ]);
     meta.appendChild(ring);
   }
-  const actions = el('div', { class: 'modal-actions' }, [
-    el('button', { class: 'btn btn-accent', 'data-nav': '', onclick: () => openRequestModal({ ...item, media, title: d.title, backdrop: d.backdrop }) }, '＋  Request'),
+      let reqBtn;
+    if (d.inLibrary) {
+      reqBtn = el('button', { class: 'btn btn-owned', 'data-nav': '', disabled: true, style: 'opacity:0.7;cursor:default;background:rgba(53,208,127,.15);color:#35d07f;border:1px solid rgba(53,208,127,.4)' }, [el('span',{},'✔'), '  In Library']);
+    } else if (d.isRequested) {
+      reqBtn = el('button', { class: 'btn btn-requested', 'data-nav': '', disabled: true, style: 'opacity:0.7;cursor:default;background:rgba(245,197,24,.15);color:#f5c518;border:1px solid rgba(245,197,24,.4)' }, [el('span',{},'✔'), '  Requested']);
+    } else {
+      reqBtn = el('button', { class: 'btn btn-accent', 'data-nav': '', onclick: () => openRequestModal({ ...item, media, title: d.title, backdrop: d.backdrop }) }, '＋  Request');
+    }
+    const actions = el('div', { class: 'modal-actions' }, [
+      reqBtn,
     d.trailerKey ? el('a', { class: 'btn btn-ghost', 'data-nav': '', href: `https://www.youtube.com/watch?v=${d.trailerKey}`, target: '_blank' }, '▶  YouTube') : null,
     d.imdbUrl ? el('a', { class: 'btn btn-imdb', 'data-nav': '', href: d.imdbUrl, target: '_blank', rel: 'noopener' }, 'IMDb ↗') : null
   ]);
@@ -1044,6 +1207,14 @@ function skeleton() { const cards = Array.from({ length: 7 }).map(() => '<div cl
 function emptyState(title, sub, showSettings) { return el('div', { class: 'empty' }, [el('h3', {}, title), el('p', {}, sub || ''), showSettings ? el('button', { class: 'btn btn-accent', 'data-nav': '', style: 'margin-top:16px', onclick: () => openSettings(false) }, 'Open Settings') : null]); }
 function focusFirstCard() { setTimeout(() => { const first = document.querySelector('.hero-actions .btn, .card, .status-card, .seg button'); if (first) setFocus(first); }, 120); }
 boot();
+
+
+
+
+
+
+
+
 
 
 

@@ -9,7 +9,7 @@ import { cached, TTL_DAY } from '../lib/cache.js';
 
 export async function getHistory(userId) {
   const { services, recommendation } = load();
-  const depth = recommendation.historyDepth || 300;
+  const depth = recommendation.historyDepth || 500;
   if (services.tautulli?.url && services.tautulli?.apikey) {
     try {
       const items = await tautulli.history(depth, userId);
@@ -53,7 +53,7 @@ async function resolve(titleKey, type) {
   } catch { return null; }
 }
 
-export async function getSeeds(userId, max = 15) {
+export async function getSeeds(userId, max = 25) {
   const { items } = await getHistory(userId);
   const profile = buildTasteProfile(items);
   const top = [...profile.entries()].sort((a, b) => b[1] - a[1]).slice(0, max);
@@ -77,14 +77,14 @@ export function genreAffinity(seeds) {
 }
 
 export async function getUserGenreAffinity(userId) {
-  const seeds = await getSeeds(userId, 20);
+  const seeds = await getSeeds(userId, 25);
   return genreAffinity(seeds);
 }
 
 async function compute({ userId, level }) {
   const cfg = load();
   const useLevel = level || cfg.recommendation.level || 1;
-  const seeds = await getSeeds(userId);
+  const seeds = await getSeeds(userId, 25);
   if (!seeds.length) {
     const t = await tmdb.trending('all', 'week');
     return { cold: true, rows: [{ title: 'Trending this week', items: normalize(t.results) }] };
@@ -94,13 +94,13 @@ async function compute({ userId, level }) {
   const hasMusic = affinity.has(10402);
   const owned = await safeOwned();
   const pool = new Map();
-  for (const s of seeds.slice(0, 10)) {
+  for (const s of seeds.slice(0, 15)) {
     for (const fn of ['recommendations', 'similar']) {
       try {
         const res = await tmdb[fn](s.media, s.id);
         for (const c of res.results || []) {
           const id = `${s.media}:${c.id}`;
-          if (owned.has(String(c.id))) continue;
+          if (owned.has(s.media + ':' + String(c.id))) continue;
           const cGenres = c.genre_ids || [];
           if (!hasKids && (cGenres.includes(10762) || (cGenres.includes(16) && cGenres.includes(10751)))) continue;
           if (!hasMusic && cGenres.includes(10402)) continue;
@@ -120,20 +120,36 @@ async function compute({ userId, level }) {
   }
   const rows = [];
   rows.push({ title: 'Picked for you', items: normalize(ranked.slice(0, 20)) });
-  for (const s of seeds.slice(0, 3)) {
+
+  // Generate multiple "Because you watched [Title]" rows for up to 15 history seeds
+  for (const s of seeds.slice(0, 15)) {
     try {
-      const res = await tmdb.recommendations(s.media, s.id);
-      const items = normalize((res.results || []).filter((c) => !owned.has(String(c.id))).slice(0, 20), s.media);
-      if (items.length) rows.push({ title: `Because you watched ${prettify(s.title)}`, items });
+      const [recRes, simRes] = await Promise.allSettled([
+        tmdb.recommendations(s.media, s.id),
+        tmdb.similar(s.media, s.id)
+      ]);
+      const recs = recRes.status === 'fulfilled' ? (recRes.value.results || []) : [];
+      const sims = simRes.status === 'fulfilled' ? (simRes.value.results || []) : [];
+      const combined = [...recs];
+      for (const item of sims) {
+        if (!combined.some(c => c.id === item.id)) combined.push(item);
+      }
+      const list = combined.filter((c) => !owned.has(s.media + ':' + String(c.id)));
+      const items = normalize(list.slice(0, 20), s.media);
+      if (items.length >= 3) {
+        rows.push({ title: `Because you watched ${prettify(s.title)}`, items });
+      }
     } catch { /* ignore */ }
   }
+
   try {
     const t = await tmdb.trending('all', 'week');
-    const items = (t.results || []).filter((c) => !owned.has(String(c.id)))
+    const items = (t.results || []).filter((c) => !owned.has((c.media_type || 'movie') + ':' + String(c.id)))
       .map((c) => ({ ...c, _score: (c.genre_ids || []).reduce((a, g) => a + (affinity.get(g) || 0), 0) }))
       .sort((a, b) => b._score - a._score);
     rows.push({ title: 'Trending, tuned to your taste', items: normalize(items.slice(0, 20)) });
   } catch { /* ignore */ }
+
   return { cold: false, seeds: seeds.map((s) => prettify(s.title)), rows };
 }
 

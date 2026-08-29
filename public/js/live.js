@@ -1,3 +1,4 @@
+import { escHTML } from './util.js';
 // live.js — "Live Streaming" tab. Now Watching shows the poster + rich stream
 // detail (4K/HDR, video+audio codecs, Direct Play vs Transcode). Stats show
 // mini posters and correct Top Platforms/Users names.
@@ -86,7 +87,7 @@ function sessionCard(s) {
 
 async function renderNow(root) {
   const d = await api('/api/discover/live/now');
-  if (d.error) { root.insertAdjacentHTML('beforeend', `<div class="live-empty">${d.error}</div>`); return; }
+  if (d.error) { root.insertAdjacentHTML('beforeend', `<div class="live-empty">${escHTML(d.error)}</div>`); return; }
   const sessions = d.sessions || [];
   if (!sessions.length) { root.insertAdjacentHTML('beforeend', `<div class="live-empty">😴 Nobody is watching right now.</div>`); return; }
   const grid = document.createElement('div'); grid.className = 'live-grid';
@@ -96,7 +97,7 @@ async function renderNow(root) {
 
 async function renderStats(root) {
   const d = await api(`/api/discover/live/stats?days=${statDays}`);
-  if (d.error) { root.insertAdjacentHTML('beforeend', `<div class="live-empty">${d.error}</div>`); return; }
+  if (d.error) { root.insertAdjacentHTML('beforeend', `<div class="live-empty">${escHTML(d.error)}</div>`); return; }
   const titleCol = (title, rows) => `<div class="stat-col"><h4>${title}</h4>${(rows || []).length ? rows.map((r, i) => `<div class="stat-item"><span class="stat-rank">${i + 1}</span>${r.poster ? `<img class="stat-mini" src="${r.poster}" alt="">` : '<div class="stat-mini ph">🎬</div>'}<span class="stat-name">${r.name || '—'}</span><span class="stat-plays">${r.total} plays</span></div>`).join('') : '<div class="row-sub">No data.</div>'}</div>`;
   const plainCol = (title, rows, icon) => `<div class="stat-col"><h4>${title}</h4>${(rows || []).length ? rows.map((r, i) => `<div class="stat-item"><span class="stat-rank">${i + 1}</span><div class="stat-mini ph">${icon}</div><span class="stat-name">${r.name || '—'}</span><span class="stat-plays">${r.total} plays</span></div>`).join('') : '<div class="row-sub">No data.</div>'}</div>`;
   const wrap = document.createElement('div'); wrap.className = 'stat-cols';
@@ -137,3 +138,4 @@ function init() {
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(init, 300));
 else setTimeout(init, 300);
+

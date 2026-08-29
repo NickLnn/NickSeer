@@ -1,3 +1,4 @@
+import { escHTML } from './util.js';
 // plex-signin-button.js — restores "Sign in with Plex" on the login screen.
 // Uses the same PIN-based OAuth flow as Seerr/Overseerr:
 //   1) POST /api/auth/plex/pin        → { id, code, authUrl }
@@ -34,8 +35,8 @@ async function startPlexLogin() {
   modal.innerHTML = `<div class="box"><h3>Sign in with Plex</h3><p>Requesting a secure PIN…</p></div>`;
   let data;
   try { data = await fetch('/api/auth/plex/pin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ forwardUrl: location.origin }) }).then((r) => r.json()); }
-  catch (e) { modal.querySelector('.box').innerHTML = `<h3>Failed</h3><p>${e.message}</p><button class="b2 cx" onclick="document.getElementById('plexModal').classList.add('hidden')">Close</button>`; return; }
-  if (!data.ok) { modal.querySelector('.box').innerHTML = `<h3>Failed</h3><p>${data.error || 'could not create PIN'}</p><button class="b2 cx" onclick="document.getElementById('plexModal').classList.add('hidden')">Close</button>`; return; }
+  catch (e) { modal.querySelector('.box').innerHTML = `<h3>Failed</h3><p>${escHTML(e.message)}</p><button class="b2 cx" onclick="document.getElementById('plexModal').classList.add('hidden')">Close</button>`; return; }
+  if (!data.ok) { modal.querySelector('.box').innerHTML = `<h3>Failed</h3><p>${escHTML(data.error || 'could not create PIN')}</p><button class="b2 cx" onclick="document.getElementById('plexModal').classList.add('hidden')">Close</button>`; return; }
   const win = window.open(data.authUrl, '_blank', 'width=800,height=720');
   modal.querySelector('.box').innerHTML = `<h3>Approve in Plex</h3><p>A Plex window opened — sign in and approve. This finishes automatically.</p><button class="b2 go" id="pxOpen">Re-open Plex</button><button class="b2 cx" id="pxCancel">Cancel</button>`;
   modal.querySelector('#pxOpen').onclick = () => window.open(data.authUrl, '_blank', 'width=800,height=720');
@@ -52,7 +53,7 @@ async function startPlexLogin() {
         localStorage.setItem('nickseer_last_user', r.user.username);
         localStorage.removeItem('nickseer_profile');
         try { if (win) win.close(); } catch { /* ignore */ }
-        modal.querySelector('.box').innerHTML = `<h3>✓ Signed in</h3><p>Welcome, ${r.user.username}. Reloading…</p>`;
+        modal.querySelector('.box').innerHTML = `<h3>✓ Signed in</h3><p>Welcome, ${escHTML(r.user.username)}. Reloading…</p>`;
         setTimeout(() => location.reload(), 700);
         return;
       }
@@ -101,3 +102,4 @@ const obs = new MutationObserver(() => { clearTimeout(t); t = setTimeout(tryAdd,
 obs.observe(document.body, { childList: true, subtree: true });
 setTimeout(tryAdd, 400);
 setTimeout(tryAdd, 1200);
+

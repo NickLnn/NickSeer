@@ -1,3 +1,4 @@
+import { escHTML } from './util.js';
 // collections.js — Franchise & Movie Collections Sub-Tab and Modal for NickSeer.
 // Identifies incomplete franchises in user's library and allows one-click batch requesting with profile/folder selection.
 
@@ -284,7 +285,7 @@ export async function openCollectionModal(collectionId) {
 
   const col = await api(`/api/discover/collection/${collectionId}`);
   if (col.error || !col.name) {
-    cardEl.innerHTML = `<div style="padding:40px">⚠️ Could not load collection: ${col.error || 'not found'}</div>`;
+    cardEl.innerHTML = `<div style="padding:40px">⚠️ Could not load collection: ${escHTML(col.error || 'not found')}</div>`;
     return;
   }
 
@@ -445,7 +446,7 @@ function renderCollectionsData(container, data) {
   }
 
   if (data.error || !data.all || !data.all.length) {
-    colBox.innerHTML = `<div class="empty-state"><h3>No collections found</h3><p>${data.error || 'Ensure TMDB API key is configured.'}</p></div>`;
+    colBox.innerHTML = `<div class="empty-state"><h3>No collections found</h3><p>${escHTML(data.error || 'Ensure TMDB API key is configured.')}</p></div>`;
     return;
   }
 
@@ -481,3 +482,4 @@ function renderCollectionsData(container, data) {
 
 window.renderCollectionsView = renderCollectionsView;
 export default { renderCollectionsView, openCollectionModal, openCollectionRequestModal };
+

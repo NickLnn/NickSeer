@@ -44,22 +44,26 @@ async function buildCuratedRows() {
 
 // batch IMDb ratings (TMDB id → imdb_id → OMDb)
 async function imdbIdFor(media, id) { return cached(`imdbid:${media}:${id}`, 30 * TTL_DAY, async () => { try { const ext = await tmdb.externalIds(media, id); return ext?.imdb_id || null; } catch { return null; } }, false); }
-router.post('/imdb-ratings', async (req, res) => {
-  const items = (req.body && req.body.items) || [];
-  const out = {};
-  await Promise.all(items.slice(0, 50).map(async (it) => {
-    const media = it.media === 'tv' || it.media === 'show' ? 'tv' : 'movie';
-    const id = it.id;
-    if (!id) return;
-    try {
-      const imdbId = await imdbIdFor(media, id);
-      if (!imdbId) return;
-      const o = await omdb.byImdbId(imdbId, media);
-      if (o?.rating) out[String(id)] = o.rating;
-    } catch { /* skip */ }
-  }));
-  res.json({ ratings: out });
-});
+  router.post('/imdb-ratings', async (req, res) => {
+    const items = (req.body && req.body.items) || [];
+    const out = {};
+    const limited = items.slice(0, 50);
+    for (let i = 0; i < limited.length; i += 5) {
+      const chunk = limited.slice(i, i + 5);
+      await Promise.all(chunk.map(async (it) => {
+        const media = it.media === 'tv' || it.media === 'show' ? 'tv' : 'movie';
+        const id = it.id;
+        if (!id) return;
+        try {
+          const imdbId = await imdbIdFor(media, id);
+          if (!imdbId) return;
+          const o = await omdb.byImdbId(imdbId, media);
+          if (o?.rating) out[String(id)] = o.rating;
+        } catch {}
+      }));
+    }
+    res.json({ ratings: out });
+  });
 
 // real brand logos
 async function tmdbProvidersRaw(media, region) { try { const d = await tmdb.watchProviders(media, region); return d.results || []; } catch { return []; } }
@@ -100,7 +104,7 @@ router.get('/ai-suggest', async (req, res) => {
       const seeds = []; for (const [k] of top) { const s = await resolveSeed(k, typeOf.get(k)); if (s) seeds.push(s); }
       const allowedLangs = new Set(['en']); if (!T.englishOnly) for (const s of seeds) if (s.lang) allowedLangs.add(s.lang);
       const owned = await ownedSet(); const pool = new Map();
-      for (const s of seeds) { for (const fn of ['recommendations', 'similar']) { try { const r = await tmdb[fn](s.media, s.id); for (const c of r.results || []) { const id = `${s.media}:${c.id}`; if (owned.has(String(c.id))) continue; if ((c.vote_average || 0) < T.minRating) continue; if ((c.vote_count || 0) < T.minVotes) continue; if (c.original_language && !allowedLangs.has(c.original_language)) continue; if (!c.poster_path) continue; if (!pool.has(id)) pool.set(id, { ...c, media: s.media }); } } catch { /* skip */ } } }
+      for (const s of seeds) { for (const fn of ['recommendations', 'similar']) { try { const r = await tmdb[fn](s.media, s.id); for (const c of r.results || []) { const id = `${s.media}:${c.id}`; if (owned.has(s.media + ':' + String(c.id))) continue; if ((c.vote_average || 0) < T.minRating) continue; if ((c.vote_count || 0) < T.minVotes) continue; if (c.original_language && !allowedLangs.has(c.original_language)) continue; if (!c.poster_path) continue; if (!pool.has(id)) pool.set(id, { ...c, media: s.media }); } } catch { /* skip */ } } }
       let candidates = [...pool.values()].sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0)).slice(0, T.maxCandidates);
       if (aiOn) { try { candidates = await aiRerank(candidates, seeds); } catch { /* keep */ } }
       return { source: aiOn ? 'ai' : 'rules', days: T.historyDays, basedOn: seeds.slice(0, 6).map((s) => cap(s.title)), items: candidates.slice(0, 24).map((c) => ({ ...mini(c), why: c._why })) };
@@ -126,12 +130,12 @@ router.get('/person/:id', async (req, res) => {
   try {
     const [p, owned] = await Promise.all([tmdb.person(req.params.id), ownedSet()]);
     const seen = new Set(); const credits = [];
-    for (const c of (p.combined_credits?.cast || [])) { if (c.adult) continue; const media = c.media_type === 'tv' ? 'tv' : 'movie'; const key = media + ':' + c.id; if (seen.has(key)) continue; seen.add(key); credits.push({ id: c.id, media, title: c.title || c.name, year: (c.release_date || c.first_air_date || '').slice(0, 4), poster: tmdb.img(c.poster_path), backdrop: tmdb.img(c.backdrop_path, 'w1280'), rating: c.vote_average, popularity: c.popularity || 0, character: c.character || '', owned: owned.has(String(c.id)) }); }
+    for (const c of (p.combined_credits?.cast || [])) { if (c.adult) continue; const media = c.media_type === 'tv' ? 'tv' : 'movie'; const key = media + ':' + c.id; if (seen.has(key)) continue; seen.add(key); credits.push({ id: c.id, media, title: c.title || c.name, year: (c.release_date || c.first_air_date || '').slice(0, 4), poster: tmdb.img(c.poster_path), backdrop: tmdb.img(c.backdrop_path, 'w1280'), rating: c.vote_average, popularity: c.popularity || 0, character: c.character || '', owned: owned.has(media + ':' + String(c.id)) }); }
     const inLibrary = credits.filter((c) => c.owned).sort((a, b) => b.popularity - a.popularity);
     const knownFor = credits.filter((c) => c.poster).sort((a, b) => b.popularity - a.popularity).slice(0, 24);
     const KEEP = ['Director', 'Writer', 'Screenplay', 'Producer', 'Executive Producer', 'Creator', 'Story'];
     const crewSeen = new Set(); const crew = [];
-    for (const c of (p.combined_credits?.crew || [])) { if (c.adult || !KEEP.includes(c.job)) continue; const media = c.media_type === 'tv' ? 'tv' : 'movie'; const key = media + ':' + c.id; if (crewSeen.has(key)) continue; crewSeen.add(key); crew.push({ id: c.id, media, title: c.title || c.name, year: (c.release_date || c.first_air_date || '').slice(0, 4), poster: tmdb.img(c.poster_path), backdrop: tmdb.img(c.backdrop_path, 'w1280'), rating: c.vote_average, popularity: c.popularity || 0, job: c.job, owned: owned.has(String(c.id)) }); }
+    for (const c of (p.combined_credits?.crew || [])) { if (c.adult || !KEEP.includes(c.job)) continue; const media = c.media_type === 'tv' ? 'tv' : 'movie'; const key = media + ':' + c.id; if (crewSeen.has(key)) continue; crewSeen.add(key); crew.push({ id: c.id, media, title: c.title || c.name, year: (c.release_date || c.first_air_date || '').slice(0, 4), poster: tmdb.img(c.poster_path), backdrop: tmdb.img(c.backdrop_path, 'w1280'), rating: c.vote_average, popularity: c.popularity || 0, job: c.job, owned: owned.has(media + ':' + String(c.id)) }); }
     const crewKnownFor = crew.filter((c) => c.poster).sort((a, b) => b.popularity - a.popularity).slice(0, 24);
     const bio = p.biography ? (p.biography.length > 420 ? p.biography.slice(0, 417) + '…' : p.biography) : '';
     res.json({ id: p.id, name: p.name, department: p.known_for_department, photo: tmdb.img(p.profile_path, 'w300'), biography: bio, birthday: p.birthday, place: p.place_of_birth, imdbId: p.external_ids?.imdb_id || null, imdbUrl: p.external_ids?.imdb_id ? `https://www.imdb.com/name/${p.external_ids.imdb_id}/` : null, counts: { library: inLibrary.length, total: credits.length, crew: crew.length }, inLibrary, knownFor, crewKnownFor });
@@ -167,6 +171,7 @@ function matchStreamAlias(str) {
 }
 
 function detectStreamingService(d, media, region = 'US') {
+  // 1. TV Networks
   if (media === 'tv' && d.networks && d.networks.length) {
     for (const net of d.networks) {
       const match = matchStreamAlias(net.name);
@@ -176,6 +181,7 @@ function detectStreamingService(d, media, region = 'US') {
     if (topNet) return { key: 'network', name: topNet.name, logo: topNet.logo_path ? 'https://image.tmdb.org/t/p/w185' + topNet.logo_path : null };
   }
 
+  // 2. Watch Providers (Flatrate streaming across user region + major regions)
   const provs = d['watch/providers']?.results || {};
   const testRegions = [region, 'US', 'GR', 'GB', 'CA', 'AU', 'DE', 'FR'].filter(Boolean);
   const seenRegions = new Set();
@@ -188,18 +194,23 @@ function detectStreamingService(d, media, region = 'US') {
       if (match) return { key: match.key, name: match.name, logo: item.logo_path ? 'https://image.tmdb.org/t/p/w185' + item.logo_path : null };
     }
   }
-  for (const r of testRegions) {
-    const flat = provs[r]?.flatrate || [];
-    if (flat.length && flat[0]) return { key: 'provider', name: flat[0].provider_name, logo: flat[0].logo_path ? 'https://image.tmdb.org/t/p/w185' + flat[0].logo_path : null };
-  }
-  if (media === 'movie' && d.production_companies && d.production_companies.length) {
+
+  // 3. Production Companies / Studio matches against recognized streaming providers
+  if (d.production_companies && d.production_companies.length) {
     for (const comp of d.production_companies) {
       const match = matchStreamAlias(comp.name);
       if (match) return { key: match.key, name: match.name, logo: comp.logo_path ? 'https://image.tmdb.org/t/p/w185' + comp.logo_path : null };
     }
-    const topComp = d.production_companies[0];
-    if (topComp && topComp.name) return { key: 'studio', name: topComp.name, logo: topComp.logo_path ? 'https://image.tmdb.org/t/p/w185' + topComp.logo_path : null };
   }
+
+  // 4. Trailer / Video Title detection (catches Netflix/Apple/Disney/Prime/Max releases before TMDB watch/providers updates)
+  const vids = d.videos?.results || [];
+  for (const v of vids) {
+    const titleMatch = matchStreamAlias(v.name || '');
+    if (titleMatch) return { key: titleMatch.key, name: titleMatch.name, logo: null };
+  }
+
+  // 5. Watch Providers (Rent/Buy fallback matching recognized streaming providers)
   for (const r of testRegions) {
     const rentOrBuy = [...(provs[r]?.buy || []), ...(provs[r]?.rent || [])];
     for (const item of rentOrBuy) {
@@ -207,6 +218,7 @@ function detectStreamingService(d, media, region = 'US') {
       if (match) return { key: match.key, name: match.name, logo: item.logo_path ? 'https://image.tmdb.org/t/p/w185' + item.logo_path : null };
     }
   }
+
   return null;
 }
 
@@ -234,13 +246,22 @@ router.get('/collection/:id', async (req, res) => {
 router.get('/:media/:id', async (req, res) => {
   const { media, id } = req.params;
   try {
-    const [d, map] = await Promise.all([tmdb.details(media, id), libMap()]);
+    // Arr lookup (safe: catches if radarr/sonarr not configured)
+      let arrCheck = Promise.resolve(null);
+      try {
+        const arrMod = await import('../services/arr.js');
+        const arrSvc = arrMod.default || arrMod;
+        if (media === 'movie') arrCheck = arrSvc.lookup('radarr', id).catch(() => null);
+        else if (media === 'tv') arrCheck = arrSvc.lookup('sonarr', id).then(r => Array.isArray(r) ? r[0] : null).catch(() => null);
+      } catch { /* arr not configured */ }
+
+      const [d, map, arrRes] = await Promise.all([tmdb.details(media, id), libMap(), arrCheck]);
+      const isRequested = !!(arrRes && arrRes.id);
     const yt = (d.videos?.results || []).filter((v) => v.site === 'YouTube');
     const trailer = yt.find((v) => v.type === 'Trailer' && v.official) || yt.find((v) => v.type === 'Trailer') || yt[0];
     const imdbId = d.external_ids?.imdb_id || null;
     let imdb = null;
-    if (imdbId) { try { const o = await omdb.byImdbId(imdbId, media); if (o?.rating) imdb = { rating: o.rating, votes: o.votes }; } catch { /* optional */ } }
-    const owned = map[String(d.id)] || null;
+    const owned = map[(media === 'tv' ? 'tv:' : 'movie:') + String(d.id)] || null;
     let seriesStatus = null, episodePercent = null, episodesOwned = null, episodesTotal = null;
     if (media === 'tv') { const raw = (d.status || '').toLowerCase(); if (raw.includes('end') || raw.includes('cancel')) seriesStatus = 'ended'; else if (raw.includes('return') || raw.includes('production') || raw.includes('airing')) seriesStatus = 'continuing'; episodesTotal = d.number_of_episodes || null; if (owned && episodesTotal) { episodesOwned = owned.leafCount || 0; episodePercent = Math.max(0, Math.min(100, Math.round((episodesOwned / episodesTotal) * 100))); } }
         const streamingService = detectStreamingService(d, media, load().tmdb?.region || 'US');
@@ -253,6 +274,16 @@ router.get('/:media/:id', async (req, res) => {
         air_date: s.air_date || '',
         poster: tmdb.img(s.poster_path, 'w342')
       })) : [];
+
+    const plexBase = load().services?.plex?.url?.replace(/\/+$/, '') || '';
+    let plexUrl = null;
+    if (owned && owned.ratingKey) {
+      if (owned.machineIdentifier) {
+        plexUrl = `https://app.plex.tv/desktop/#!/server/${owned.machineIdentifier}/details?key=%2Flibrary%2Fmetadata%2F${owned.ratingKey}`;
+      } else if (plexBase) {
+        plexUrl = `${plexBase}/web/index.html#!/details?key=%2Flibrary%2Fmetadata%2F${owned.ratingKey}`;
+      }
+    }
 
     res.json({
       id: d.id,
@@ -272,6 +303,8 @@ router.get('/:media/:id', async (req, res) => {
       backdrop: tmdb.img(d.backdrop_path, 'original'),
       trailerKey: trailer ? trailer.key : null,
       inLibrary: !!owned,
+        isRequested: isRequested && !owned,
+      plexUrl,
       libraryServer: owned?.server || 'Plex',
       librarySection: owned?.section || '',
       seriesStatus,
@@ -296,3 +329,8 @@ function mini(c) {
 }
 
 export default router;
+
+
+
+
+

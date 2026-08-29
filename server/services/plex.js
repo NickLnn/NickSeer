@@ -67,12 +67,14 @@ async function scan() {
   const map = {};
   const sectionsOut = [];
   let server = 'Plex';
+  let machineIdentifier = '';
   const { services } = load();
   const selectedLibs = services.plex?.selectedLibraries;
 
   try {
     const root = await call('/');
     server = root?.MediaContainer?.friendlyName || 'Plex';
+    machineIdentifier = root?.MediaContainer?.machineIdentifier || '';
     const secs = (await sections())?.MediaContainer?.Directory || [];
 
     for (const sec of secs) {
@@ -92,11 +94,16 @@ async function scan() {
         const id = tmdbIdFromItem(it);
         if (id) {
           matched++;
-          map[String(id)] = {
+          const mapKey = (it.type === 'show' ? 'tv:' : 'movie:') + String(id);
+            map[mapKey] = {
+            ratingKey: it.ratingKey,
+            key: it.key,
+            guid: it.guid,
             type: it.type === 'show' ? 'show' : 'movie',
             leafCount: Number(it.leafCount || 0),
             childCount: Number(it.childCount || 0),
             server,
+            machineIdentifier,
             section: sec.title
           };
         }
@@ -150,3 +157,5 @@ export async function forceScan() {
 }
 
 export default { test, testWithSections, sections, history, libraryMap, libraryTmdbIds, libraryDetail, invalidateLibrary, forceScan };
+
+

@@ -1,3 +1,4 @@
+import { escHTML } from './util.js';
 // info.js — "Info" view with Live Host & Hardware Telemetry Sub-Tab + Services Health Sub-Tab.
 // Sub-Tab 1 (Default): 🖥️ Host & Hardware (Device Name, CPU Temp, CPU Usage, RAM, Disks, OS, Live 3s refresh).
 // Sub-Tab 2: 🏥 Services & Health (System Health, Plex Library, App Activity, Radarr, Sonarr queues).
@@ -50,7 +51,7 @@ async function renderHealthCard(grid) {
   const load = async () => {
     const d = await api('/api/health-detail');
     const body = card.querySelector('#hcBody'); const sum = card.querySelector('#hcSum');
-    if (d.error) { body.innerHTML = `<div class="row-sub">${d.error}</div>`; return; }
+    if (d.error) { body.innerHTML = `<div class="row-sub">${escHTML(d.error)}</div>`; return; }
     body.innerHTML = healthRows(d.checks || []);
     if (d.summary) sum.innerHTML = `<span class="hc-pill ok">${d.summary.ok} ✓</span>${d.summary.bad ? `<span class="hc-pill bad">${d.summary.bad} ✕</span>` : ''}${d.summary.off ? `<span class="hc-pill off">${d.summary.off} off</span>` : ''}`;
     const btn = document.createElement('button'); btn.className = 'hc-refresh'; btn.setAttribute('data-nav', ''); btn.textContent = '⟳ Re-check services';
@@ -76,7 +77,7 @@ async function renderHostDashboard(container) {
   const updateMetrics = async () => {
     const d = await api('/api/health-detail/system?_t=' + Date.now(), { force: true });
     if (d.error || !d.device) {
-      container.innerHTML = `<div class="status-card" style="grid-column:1/-1"><div class="row-sub">⚠️ Could not read host telemetry: ${d.error || 'unknown error'}</div></div>`;
+      container.innerHTML = `<div class="status-card" style="grid-column:1/-1"><div class="row-sub">⚠️ Could not read host telemetry: ${escHTML(d.error || 'unknown error')}</div></div>`;
       return;
     }
 
@@ -324,10 +325,11 @@ function init() {
     } else if (!isInfoActive()) {
       stopHostTimer();
     }
-    stripDownloads();
   });
   obs.observe(app() || document.body, { childList: true, subtree: true });
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(init, 300));
 else setTimeout(init, 300);
+
+

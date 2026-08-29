@@ -1,3 +1,4 @@
+import { escHTML } from './util.js';
 // approvals.js — "Approvals" tab (Seerr-style).
 // Dedicated sub-tabs: [ ⏳ Pending (X) ] and [ ✓ Approved (Y) ] + [ ✕ Declined ] & [ All ].
 // Admins see full details (quality profile, root folder, tags), and an inline Edit panel.
@@ -50,7 +51,7 @@ function injectStyles() {
   .appr-edit-panel.open{display:block;}
   @keyframes apprSlide{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
   .appr-edit-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px;}
-  @media(max-width:600px){.appr-edit-grid{grid-template-columns:1fr;}}
+  @media(max-width:600px){.appr-edit-grid{grid-template-columns:1fr;}.appr-head,.appr-list{padding-left:16px;padding-right:16px;}.appr-subtabs{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;}.appr-subtabs::-webkit-scrollbar{display:none;}.appr-subtab{white-space:nowrap;}}
   .appr-edit-field label{display:block;font-size:11px;font-weight:700;color:#8a93a0;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px;}
   .appr-edit-field select,.appr-edit-field input{width:100%;background:#12121a;border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 12px;color:#fff;font-size:13px;outline:none;}
   .appr-edit-field select:focus,.appr-edit-field input:focus{border-color:rgba(46,155,214,.6);}
@@ -148,7 +149,7 @@ async function render() {
   });
 
   const list = root.querySelector('#apprList');
-  if (d.error) { list.innerHTML = `<div class="appr-empty"><h3>${d.error}</h3></div>`; return; }
+  if (d.error) { list.innerHTML = `<div class="appr-empty"><h3>${escHTML(d.error)}</h3></div>`; return; }
 
   // Pre-fetch options for radarr/sonarr to resolve profile names
   const hasMovies = reqs.some((r) => r.media !== 'tv' && r.media !== 'show');

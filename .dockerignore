@@ -1,15 +1,7 @@
-# Never let a docker build pick up your live runtime data or local junk.
-config/
-config/**
-.env
-.env.*
-.git/
-.github/
-node_modules/
+node_modules
+config
 *.log
-*.bak
-*.bak.*
-*.full.html.bak
+.env
+.git
 .DS_Store
-README.md
-publish-kit/
+npm-debug.log
