@@ -129,7 +129,7 @@ async function renderHostDashboard(container) {
             <span class="status-name" style="font-weight:800;font-size:16px">CPU & Thermals</span>
           </div>
           <div class="host-temp-badges">
-            <span class="host-temp-badge live ${tempClass}">🔥 ${tempVal}°C</span>
+            <span class="host-temp-badge live ${tempClass}">🔥 ${tempVal}°C${d.cpu.tempSource === 'simulated' ? ' <small style="opacity:0.6;font-size:0.8em">(est.)</small>' : ''}</span>
             <span class="host-temp-badge max">⚡ Max: ${d.cpu.maxTemperature || tempVal}°C</span>
           </div>
         </div>
@@ -331,5 +331,6 @@ function init() {
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(init, 300));
 else setTimeout(init, 300);
+
 
 

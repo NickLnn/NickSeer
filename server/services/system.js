@@ -100,7 +100,9 @@ function getCpuInfo() {
   }
   prevCpuTimes = { total, idle };
 
-  const temperature = getCpuTemperature(usagePercent);
+  const tempObj = getCpuTemperature(usagePercent);
+  const temperature = tempObj.value;
+  const tempSource = tempObj.source;
   if (!maxRecordedTemp || temperature > maxRecordedTemp) {
     maxRecordedTemp = temperature;
   }
@@ -114,12 +116,39 @@ function getCpuInfo() {
     temperature,
     maxTemperature: maxRecordedTemp,
     tempUnit: '°C',
+    tempSource,
     loadAvg
   };
 }
 
 function getCpuTemperature(usageHint = 5) {
-  // 1. Check /sys/class/thermal/thermal_zone*/temp
+  let temps = [];
+
+  const addTemp = (val, src, name = 'unknown') => {
+    if (!isNaN(val) && val > 20 && val < 110 && val !== 27.8) {
+      temps.push({ val, src, name });
+    }
+  };
+
+  try {
+    const hwmonDir = '/sys/class/hwmon';
+    if (fs.existsSync(hwmonDir)) {
+      const hwmons = fs.readdirSync(hwmonDir);
+      for (const h of hwmons) {
+        const dir = path.join(hwmonDir, h);
+        let name = 'unknown';
+        try { name = fs.readFileSync(path.join(dir, 'name'), 'utf8').trim(); } catch {}
+        
+        const inputs = fs.readdirSync(dir).filter(f => f.startsWith('temp') && f.endsWith('_input'));
+        for (const inp of inputs) {
+          const raw = parseFloat(fs.readFileSync(path.join(dir, inp), 'utf8').trim());
+          const c = raw > 1000 ? Math.round((raw / 1000) * 10) / 10 : Math.round(raw * 10) / 10;
+          addTemp(c, 'sysfs_hwmon', name);
+        }
+      }
+    }
+  } catch {}
+
   try {
     const thermalDir = '/sys/class/thermal';
     if (fs.existsSync(thermalDir)) {
@@ -127,50 +156,45 @@ function getCpuTemperature(usageHint = 5) {
       for (const z of zones) {
         const p = path.join(thermalDir, z, 'temp');
         if (fs.existsSync(p)) {
+          let type = 'unknown';
+          try { type = fs.readFileSync(path.join(thermalDir, z, 'type'), 'utf8').trim(); } catch {}
           const raw = parseFloat(fs.readFileSync(p, 'utf8').trim());
-          if (!isNaN(raw) && raw > 0) {
-            const c = raw > 1000 ? Math.round((raw / 1000) * 10) / 10 : Math.round(raw * 10) / 10;
-            if (c >= 20 && c <= 115) return c;
-          }
+          const c = raw > 1000 ? Math.round((raw / 1000) * 10) / 10 : Math.round(raw * 10) / 10;
+          addTemp(c, 'sysfs_thermal', type);
         }
       }
     }
   } catch {}
 
-  // 2. Check /sys/class/hwmon/hwmon*/temp*_input
   try {
-    const hwmonDir = '/sys/class/hwmon';
-    if (fs.existsSync(hwmonDir)) {
-      const hwmons = fs.readdirSync(hwmonDir);
-      for (const h of hwmons) {
-        const dir = path.join(hwmonDir, h);
-        const inputs = fs.readdirSync(dir).filter(f => f.startsWith('temp') && f.endsWith('_input'));
-        for (const inp of inputs) {
-          const p = path.join(dir, inp);
-          const raw = parseFloat(fs.readFileSync(p, 'utf8').trim());
-          if (!isNaN(raw) && raw > 0) {
-            const c = raw > 1000 ? Math.round((raw / 1000) * 10) / 10 : Math.round(raw * 10) / 10;
-            if (c >= 20 && c <= 115) return c;
-          }
-        }
-      }
+    if (fs.existsSync('/run/synoinfo/temperature')) {
+      const raw = parseFloat(fs.readFileSync('/run/synoinfo/temperature', 'utf8').trim());
+      addTemp(raw, 'synology_run', 'synoinfo');
     }
   } catch {}
 
-  // 3. Fallback sensors command (Linux)
-  try {
-    const out = child_process.execSync('sensors', { timeout: 800, encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
-    const match = out.match(/(?:Package id 0|Core 0|CPU Temperature|temp1):\s*\+?([\d.]+)°C/i) || out.match(/\+?([\d.]+)°C/);
-    if (match) {
-      const c = Math.round(parseFloat(match[1]) * 10) / 10;
-      if (c >= 20 && c <= 115) return c;
-    }
-  } catch {}
+  if (temps.length === 0) {
+    return { value: Math.round((35 + (usageHint * 0.45)) * 10) / 10, source: 'simulated' };
+  }
 
-  // 4. Dynamic thermal model with realistic inertia and load responsiveness
-  const targetTemp = 39.0 + (usageHint * 0.26) + ((Math.random() * 1.2) - 0.6);
-  simulatedThermalState += (targetTemp - simulatedThermalState) * 0.35;
-  return Math.round(simulatedThermalState * 10) / 10;
+  // Filter out clearly fake dummy sensors (often exactly 114.0, 115.0, or 127.0)
+  temps = temps.filter(t => t.val < 105);
+
+  // 1. If we have explicit 'coretemp' (Intel) or 'k10temp' (AMD), ONLY use those.
+  const cpuSensors = temps.filter(t => t.name === 'coretemp' || t.name === 'k10temp' || t.name.includes('cpu') || t.name.includes('x86_pkg_temp'));
+  const validTemps = cpuSensors.length > 0 ? cpuSensors : temps;
+
+  // Now just take the maximum of the valid pool (to find the hottest core)
+  let maxTemp = -1;
+  let bestSource = 'none';
+  for (const t of validTemps) {
+    if (t.val > maxTemp) {
+      maxTemp = t.val;
+      bestSource = t.src;
+    }
+  }
+
+  return { value: maxTemp > 0 ? maxTemp : 45.0, source: bestSource };
 }
 
 function getMemoryInfo() {
@@ -179,8 +203,9 @@ function getMemoryInfo() {
   let available = free;
 
   try {
-    if (fs.existsSync('/proc/meminfo')) {
-      const raw = fs.readFileSync('/proc/meminfo', 'utf8');
+    const meminfoPath = fs.existsSync('/host/proc/meminfo') ? '/host/proc/meminfo' : '/proc/meminfo';
+    if (fs.existsSync(meminfoPath)) {
+      const raw = fs.readFileSync(meminfoPath, 'utf8');
       const getKb = (k) => {
         const m = raw.match(new RegExp(k + ':\\s+(\\d+)\\s+kB', 'i'));
         return m ? parseInt(m[1], 10) * 1024 : null;
@@ -297,3 +322,5 @@ export function getSystemMetrics() {
 }
 
 export default { getSystemMetrics };
+
+

@@ -11,7 +11,7 @@ services:
     restart: unless-stopped
     # Run as the same user/group as your other containers so the mounted
     # ./config folder is writable without permission clashes.
-    user: "1026:100"
+    #user: "1026:100"
     environment:
       - PORT=5056
       - CONFIG_DIR=/config
@@ -24,6 +24,10 @@ services:
       - ./config:/config
       - ./server:/app/server
       - ./public:/app/public
+      - /sys/class/thermal:/sys/class/thermal:ro
+      - /sys/class/hwmon:/sys/class/hwmon:ro
+      - /proc/meminfo:/host/proc/meminfo:ro   # bonus: accurate host RAM
+
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5056/api/health"]
       interval: 30s
