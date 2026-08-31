@@ -59,7 +59,10 @@ services:
       - PGID=1000
     volumes:
       - ./config:/config   # Persists all settings, API keys & user accounts
-```
+      # Hardware sensors for accurate Live Streaming thermals & NAS RAM telemetry
+      - /sys/class/thermal:/sys/class/thermal:ro
+      - /sys/class/hwmon:/sys/class/hwmon:ro
+      - /proc/meminfo:/host/proc/meminfo:ro``
 
 ### 2. Launch Container
 ```bash
