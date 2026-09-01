@@ -1,3 +1,0 @@
-Add this key to the DEFAULTS object in server/config.js (top level, next to `ai`):
-
-  aiTuning: { minRating: 6.2, minVotes: 80, maxCandidates: 50, historyDays: 60, englishOnly: false },
