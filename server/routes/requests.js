@@ -5,6 +5,8 @@ import auth from '../services/auth.js';
 import arr from '../services/arr.js';
 import plex from '../services/plex.js';
 import { load, setRequests } from '../config.js';
+import { notify } from '../services/telegram.js';
+import { notify as discordNotify } from '../services/discord.js';
 
 const router = express.Router();
 
@@ -36,9 +38,11 @@ router.post('/:id/approve', async (req, res) => {
     rq.status = 'approved'; rq.decidedAt = Date.now(); rq.decidedBy = u ? u.username : 'admin';
     setRequests(all);
     try { plex.invalidateLibrary(); } catch { /* ignore */ }
+    notify('approved', rq); discordNotify('approved', rq);
     res.json({ ok: true, id: result.id });
   } catch (e) {
     if (isAlreadyExists(e.message)) { rq.status = 'approved'; rq.note = 'already in library'; setRequests(all); return res.json({ ok: true, exists: true }); }
+    notify('failed', rq); discordNotify('failed', rq);
     res.status(200).json({ ok: false, error: e.message });
   }
 });
@@ -51,6 +55,7 @@ router.post('/:id/decline', (req, res) => {
   if (!rq) return res.status(200).json({ ok: false, error: 'not found' });
   rq.status = 'declined'; rq.decidedAt = Date.now(); rq.decidedBy = u ? u.username : 'admin';
   setRequests(all);
+  notify('declined', rq); discordNotify('declined', rq);
   res.json({ ok: true });
 });
 
@@ -82,7 +87,8 @@ async function addNow(rq) {
   const kind = kindFor(rq.media);
   const tagIds = [...(rq.tags || [])];
   for (const label of (rq.newTags || [])) { if (!label) continue; const id = await arr.ensureTag(kind, label); if (!tagIds.includes(id)) tagIds.push(id); }
-  return arr.add(kind, rq.tmdbId, { qualityProfileId: rq.qualityProfileId ? Number(rq.qualityProfileId) : undefined, rootFolder: rq.rootFolder || undefined, tags: tagIds });
+  const idToUse = (kind === 'sonarr' && rq.tvdbId) ? `tvdb:${rq.tvdbId}` : rq.tmdbId;
+  return arr.add(kind, idToUse, { qualityProfileId: rq.qualityProfileId ? Number(rq.qualityProfileId) : undefined, rootFolder: rq.rootFolder || undefined, tags: tagIds });
 }
 
 export { userFrom, isAlreadyExists, kindFor, addNow };

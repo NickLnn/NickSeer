@@ -69,3 +69,12 @@ export function escHTML(str) {
   });
 }
 
+
+export function hasCache(path) {
+  const cacheKey = path + ':' + authToken();
+  if (clientApiCache.has(cacheKey)) {
+    const entry = clientApiCache.get(cacheKey);
+    if (Date.now() - entry.time < 300000) return true;
+  }
+  return false;
+}

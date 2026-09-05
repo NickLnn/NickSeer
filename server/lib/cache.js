@@ -19,6 +19,11 @@ export function set(key, value, ttl = DAY) {
 }
 
 export function del(key) { store.delete(key); }
+export function delPrefix(prefix) {
+  for (const k of store.keys()) {
+    if (k.startsWith(prefix)) store.delete(k);
+  }
+}
 export function clear() { store.clear(); }
 
 // Wrap an async producer with caching. If force is true, ignore any cached

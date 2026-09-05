@@ -37,6 +37,22 @@ A modern, self-hosted discovery hub and request manager for **Plex** & **Jellyfi
 - **Automated Routing:** Automatically checks Plex library availability; if missing, routes requests directly to Radarr (Movies) or Sonarr (TV).
 - **Admin Approvals Queue:** Dedicated tabs (`⏳ Pending`, `✓ Approved`, `✕ Declined`, `All`) with live badge counts and inline request editing (*quality profiles, root folder paths, tags*).
 
+### 🤖 7. Overseerr API Compatibility & Requestrr Discord Bot
+- **Full `/api/v1` Emulation:** Built-in drop-in Overseerr API compatibility layer allowing tools like **Requestrr** to interact directly with NickSeer.
+- **Requester Attribution:** Maps external user IDs (`X-API-User`) directly to corresponding local NickSeer user accounts.
+- **Radarr & Sonarr Webhooks:** Ingests media import/download webhooks at `/api/v1/webhook` to automatically mark items as `Available` in real time.
+
+### 📊 8. Overseerr Movie & Series Metadata Hub
+- **Rich Technical & Financial Data:** Embedded metadata block directly in the details modal showcasing TMDB Status, Formatted Release Date (with ticket icon), Worldwide Revenue, Production Budget, Original Language, Production Country with flag emoji, and Studio name.
+- **Adaptive Layout:** Clean responsive design system integration matching the dark glassmorphic theme across desktop, tablet, and mobile.
+
+### 🔔 9. Automated Notifications (Telegram & Discord) & Hardware Telemetry
+- **Instant Alerts:** Dispatches rich notification cards to **Telegram** and **Discord** for request events (Pending, Approved, Declined, Available).
+- **Host Telemetry & Monitoring:** Live CPU utilization, thermal sensor monitoring, RAM telemetry, and sustained temperature threshold alerts.
+
+### 🎬 10. Movie Collections & Franchise Browser
+- **Franchise Sagas:** Interactive collection browsing with complete franchise completion tracking and batch requesting.
+
 ---
 
 ## 🚀 Quick Start (Docker Compose)
@@ -62,7 +78,8 @@ services:
       # Hardware sensors for accurate Live Streaming thermals & NAS RAM telemetry
       - /sys/class/thermal:/sys/class/thermal:ro
       - /sys/class/hwmon:/sys/class/hwmon:ro
-      - /proc/meminfo:/host/proc/meminfo:ro``
+      - /proc/meminfo:/host/proc/meminfo:ro
+```
 
 ### 2. Launch Container
 ```bash

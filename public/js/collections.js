@@ -43,17 +43,41 @@ function createCollectionCard(col) {
   card.setAttribute('data-nav', '');
   card.tabIndex = 0;
 
-  const pct = col.completionPercent || 0;
-  const isComplete = col.missing === 0 && col.owned > 0;
-  const isIncomplete = col.owned > 0 && col.missing > 0;
+  // Aggregate status from individual child movies when direct parent mapping is absent
+  const parts = Array.isArray(col.parts) ? col.parts : [];
+  const total = typeof col.total === 'number' ? col.total : parts.length;
+  const owned = typeof col.owned === 'number' ? col.owned : parts.filter(p => p.inLibrary).length;
+  const pending = typeof col.pending === 'number' ? col.pending : parts.filter(p => p.isPending).length;
+  const missing = typeof col.missing === 'number' ? col.missing : Math.max(0, total - owned);
+  const unrequested = typeof col.unrequested === 'number' ? col.unrequested : Math.max(0, total - owned - pending);
+  const pct = total > 0 ? Math.round((owned / total) * 100) : (col.completionPercent || 0);
+
+  const isComplete = total > 0 && owned === total;
+  const isPartial = owned > 0 && owned < total;
+  const isUnowned = owned === 0;
 
   let badgeHtml = '';
   if (isComplete) {
-    badgeHtml = `<span class="col-badge complete">✓ Complete (${col.total}/${col.total})</span>`;
-  } else if (isIncomplete) {
-    badgeHtml = `<span class="col-badge incomplete">⚡ ${col.owned}/${col.total} in Library · ${col.missing} Missing</span>`;
+    badgeHtml = `<span class="col-badge complete">✓ In Library (${total}/${total})</span>`;
+  } else if (isPartial) {
+    if (unrequested === 0 && pending > 0) {
+      badgeHtml = `<span class="col-badge complete" style="background:rgba(245,197,24,0.88);color:#1a1500;box-shadow:0 2px 8px rgba(245,197,24,0.4);">⏳ ${owned}/${total} in Library · ${pending} Requested</span>`;
+    } else {
+      badgeHtml = `<span class="col-badge incomplete">⚡ ${owned}/${total} in Library · ${unrequested} Missing</span>`;
+    }
   } else {
-    badgeHtml = `<span class="col-badge unowned">${col.total} Movies</span>`;
+    badgeHtml = `<span class="col-badge unowned">${total} Movies</span>`;
+  }
+
+  let statusText = '';
+  if (isUnowned) {
+    statusText = 'Not in library';
+  } else if (isComplete) {
+    statusText = `In library (${total}/${total})`;
+  } else if (unrequested === 0 && pending > 0) {
+    statusText = `${owned} / ${total} in library · ${pending} Requested`;
+  } else {
+    statusText = `${owned} / ${total} in library`;
   }
 
   const posterImg = col.poster || col.backdrop || '/favicon.svg';
@@ -71,7 +95,7 @@ function createCollectionCard(col) {
     </div>
     <div class="col-info">
       <div class="col-title" title="${col.name}">${col.name}</div>
-      <div class="col-meta">${col.total} Parts · ${col.owned > 0 ? col.owned + ' Owned' : 'Not in library'}</div>
+      <div class="col-meta">${total} Parts · ${statusText}</div>
     </div>
   `;
 
@@ -248,6 +272,7 @@ export async function openCollectionRequestModal(col) {
     });
 
     if (res.ok) {
+      collectionsCache = null;
       host.classList.add('hidden');
       toast(`🎉 Successfully requested all ${res.requestedCount} movies for ${col.name}!`);
       
@@ -289,10 +314,15 @@ export async function openCollectionModal(collectionId) {
     return;
   }
 
-  const isComplete = col.missing === 0 && col.owned > 0;
-  const pct = col.completionPercent || 0;
+  const parts = Array.isArray(col.parts) ? col.parts : [];
+  const total = typeof col.total === 'number' ? col.total : parts.length;
+  const owned = typeof col.owned === 'number' ? col.owned : parts.filter(p => p.inLibrary).length;
+  const pendingParts = parts.filter(p => !p.inLibrary && p.isPending);
+  const unrequestedParts = parts.filter(p => !p.inLibrary && !p.isPending);
+  const isComplete = total > 0 && owned === total;
+  const pct = total > 0 ? Math.round((owned / total) * 100) : (col.completionPercent || 0);
 
-  const partsHtml = (col.parts || []).map(p => {
+  const partsHtml = parts.map(p => {
     let statusPill = '';
     if (p.inLibrary) {
       statusPill = `<span class="col-part-pill in-lib">✓ In library</span>`;
@@ -331,15 +361,19 @@ export async function openCollectionModal(collectionId) {
             <div class="col-modal-progress-bar">
               <i style="width:${pct}%;background:${isComplete ? '#35d07f' : 'linear-gradient(90deg, #2E9BD6, #f5c518)'}"></i>
             </div>
-            <span class="col-modal-progress-txt"><b>${col.owned}/${col.total}</b> in Library (${pct}%)</span>
+            <span class="col-modal-progress-txt"><b>${owned}/${total}</b> in Library${pendingParts.length > 0 ? ` · <b>${pendingParts.length}</b> Requested` : ''} (${pct}%)</span>
           </div>
           <div class="col-modal-actions">
-            ${!isComplete ? `
+            ${isComplete ? `
+              <div class="col-complete-msg">✓ Entire Franchise Complete in Library</div>
+            ` : unrequestedParts.length > 0 ? `
               <button class="btn btn-gold btn-batch-request" id="btnRequestCollection" data-nav>
-                ➕ Request All (${col.missing} Missing)
+                ➕ Request All (${unrequestedParts.length} Missing)
               </button>
             ` : `
-              <div class="col-complete-msg">✓ Entire Franchise Complete in Library</div>
+              <div class="col-complete-msg" style="background:rgba(245,197,24,0.16);border:1px solid rgba(245,197,24,0.4);color:#f5c518;">
+                ⏳ All Remaining Movies Already Requested
+              </div>
             `}
           </div>
         </div>
@@ -480,6 +514,12 @@ function renderCollectionsData(container, data) {
   }
 }
 
+export function invalidateCollectionsCache() {
+  collectionsCache = null;
+  lastColFetch = 0;
+}
+window.invalidateCollectionsCache = invalidateCollectionsCache;
+
 window.renderCollectionsView = renderCollectionsView;
-export default { renderCollectionsView, openCollectionModal, openCollectionRequestModal };
+export default { renderCollectionsView, openCollectionModal, openCollectionRequestModal, invalidateCollectionsCache };
 

@@ -15,6 +15,8 @@ import tautulli from '../services/tautulli.js';
 import plex from '../services/plex.js';
 import auth from '../services/auth.js';
 import { load, setRequests } from '../config.js';
+import * as telegram from '../services/telegram.js';
+import * as discord from '../services/discord.js';
 import crypto from 'crypto';
 
 const router = express.Router();
@@ -62,9 +64,11 @@ router.post('/', async (req, res) => {
     if (all.find((r) => r.status === 'pending' && String(r.tmdbId) === String(tmdbId) && r.media === media)) {
       return res.json({ ok: true, code: 'pending', already: true });
     }
-    all.unshift({ id: crypto.randomUUID(), status: 'pending', media, tmdbId, title: title || '', poster: poster || '', by: u ? u.username : 'guest', at: Date.now(), qualityProfileId: qualityProfileId || null, rootFolder: rootFolder || '', tags, newTags, seasons });
-    setRequests(all);
-    return res.json({ ok: true, code: 'pending' });
+    const rq = { id: crypto.randomUUID(), status: 'pending', media, tmdbId, title: title || '', poster: poster || '', by: u ? u.username : 'guest', at: Date.now(), qualityProfileId: qualityProfileId || null, rootFolder: rootFolder || '', tags, newTags, seasons };
+      all.unshift(rq);
+      setRequests(all);
+      telegram.notify('pending', rq); discord.notify('pending', rq);
+      return res.json({ ok: true, code: 'pending' });
   }
 
   try {
@@ -72,10 +76,12 @@ router.post('/', async (req, res) => {
     for (const label of newTags) { if (!label) continue; const id = await arr.ensureTag(kind, label); if (!tagIds.includes(id)) tagIds.push(id); }
     const result = await arr.add(kind, tmdbId, { qualityProfileId: qualityProfileId ? Number(qualityProfileId) : undefined, rootFolder: rootFolder || undefined, tags: tagIds, seasons });
     try { plex.invalidateLibrary(); } catch { /* ignore */ }
-    res.json({ ok: true, kind, id: result.id, title: result.title || result.movie?.title });
+      telegram.notify('autoApproved', { title, media, tmdbId, poster, by: u ? u.username : 'guest' }); discord.notify('autoApproved', { title, media, tmdbId, poster, by: u ? u.username : 'guest' });
+      res.json({ ok: true, kind, id: result.id, title: result.title || result.movie?.title });
   } catch (e) {
-    if (isAlreadyExists(e.message)) return res.status(200).json({ ok: false, code: 'exists', kind, error: `Already added to ${cap(kind)}.` });
-    res.status(200).json({ ok: false, error: e.message });
+    if (isAlreadyExists(e.message)) { telegram.notify('available', { title, media, tmdbId, poster, by: u ? u.username : 'guest' }); discord.notify('available', { title, media, tmdbId, poster, by: u ? u.username : 'guest' }); return res.status(200).json({ ok: false, code: 'exists', kind, error: `Already added to ${cap(kind)}.` }); }
+      telegram.notify('failed', { title, media, tmdbId, poster, by: u ? u.username : 'guest' }); discord.notify('failed', { title, media, tmdbId, poster, by: u ? u.username : 'guest' });
+      res.status(200).json({ ok: false, error: e.message });
   }
 });
 

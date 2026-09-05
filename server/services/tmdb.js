@@ -36,6 +36,7 @@ export const recommendations = (media, id) => tmdb(`/${media}/${id}/recommendati
 export const similar = (media, id) => tmdb(`/${media}/${id}/similar`);
 export const videos = (media, id) => tmdb(`/${media}/${id}/videos`);
 export const search = (query, media = 'multi') => tmdb(`/search/${media}`, { query });
+export const find = (externalId, source = 'tvdb_id') => tmdb(`/find/${externalId}`, { external_source: source });
 export const discover = (media, params) => tmdb(`/discover/${media}`, params);
 export const genres = (media) => tmdb(`/genre/${media}/list`);
 export const externalIds = (media, id) => tmdb(`/${media}/${id}/external_ids`);
@@ -89,7 +90,7 @@ async function providerList(media, region) {
   providerCache.set(key, list);
   return list;
 }
-export const STREAMING = [
+const RAW_STREAMING = [
   { key: 'netflix',   label: 'Netflix',     aliases: ['Netflix'] },
   { key: 'disney',    label: 'Disney+',     aliases: ['Disney Plus', 'Disney+'] },
   { key: 'amazon',    label: 'Prime Video', aliases: ['Amazon Prime Video', 'Prime Video'] },
@@ -98,11 +99,17 @@ export const STREAMING = [
   { key: 'paramount', label: 'Paramount+',  aliases: ['Paramount Plus', 'Paramount+'] },
   { key: 'peacock',   label: 'Peacock',     aliases: ['Peacock Premium Plus', 'Peacock Premium', 'Peacock'] }
 ];
+export const STREAMING = Array.from(new Map(RAW_STREAMING.map((s) => [s.key, s])).values());
 export async function providerId(providerKey, media = 'movie') {
   const { region } = auth();
   const svc = STREAMING.find((s) => s.key === providerKey);
   if (!svc) throw new Error('unknown provider');
   const list = await providerList(media, region || 'US');
+  // For Apple, prioritize flatrate Apple TV+ subscription (ID 350) over store channel (ID 2)
+  if (providerKey === 'apple') {
+    const plus = list.find((p) => p.id === 350) || list.find((p) => /apple tv\s*(\+|plus)/i.test(p.name));
+    if (plus) return plus.id;
+  }
   for (const alias of svc.aliases) { const hit = list.find((p) => p.name.toLowerCase() === alias.toLowerCase()) || list.find((p) => p.name.toLowerCase().includes(alias.toLowerCase())); if (hit) return hit.id; }
   return null;
 }
@@ -113,11 +120,43 @@ async function providerDiscover(providerKey, media, params) {
   const data = await discover(media, { watch_region: region || 'US', with_watch_providers: id, ...params });
   return { items: data.results || [], usedMedia: media };
 }
-export async function topByProvider(providerKey, media = 'movie', limit = 10) {
+export async function topByProvider(providerKey, media = 'movie', limit = 10, allowFallback = false) {
   const svc = STREAMING.find((s) => s.key === providerKey);
-  const base = { sort_by: 'popularity.desc', 'vote_count.gte': 20, page: 1 };
-  let r = await providerDiscover(providerKey, media, base);
-  if (!r.items.length && media === 'movie') r = await providerDiscover(providerKey, 'tv', base);
+  if (!svc) return { provider: providerKey, items: [], media };
+
+  // Prioritize recent, contemporary hits (rolling 3-4 year window) to reflect active platform streaming
+  const dateField = media === 'tv' ? 'first_air_date' : 'primary_release_date';
+  const recentDays = media === 'tv' ? 365 * 4 : 365 * 3;
+  const recentParams = {
+    sort_by: 'popularity.desc',
+    'vote_count.gte': 8,
+    page: 1,
+    [`${dateField}.gte`]: daysAgo(recentDays),
+    [`${dateField}.lte`]: today()
+  };
+
+  let r = await providerDiscover(providerKey, media, recentParams);
+
+  // If recent releases return fewer than requested limit, supplement with top catalog titles
+  if ((r.items || []).length < limit) {
+    const fallbackParams = { sort_by: 'popularity.desc', 'vote_count.gte': 15, page: 1 };
+    const catalog = await providerDiscover(providerKey, media, fallbackParams);
+    const seen = new Set((r.items || []).map((it) => it.id));
+    const combined = [...(r.items || [])];
+    for (const it of catalog.items || []) {
+      if (!seen.has(it.id)) {
+        seen.add(it.id);
+        combined.push(it);
+        if (combined.length >= limit) break;
+      }
+    }
+    r = { items: combined, usedMedia: media };
+  }
+
+  if (!r.items.length && allowFallback && media === 'movie') {
+    r = await providerDiscover(providerKey, 'tv', { sort_by: 'popularity.desc', 'vote_count.gte': 10, page: 1 });
+  }
+
   return { provider: svc.label, items: r.items.slice(0, limit), media: r.usedMedia };
 }
 export async function newlyAdded(providerKey, media = 'movie', limit = 20) {
@@ -150,4 +189,4 @@ export async function comingSoonCinema(media = 'movie', limit = 24) {
   return { items: (d.results || []).slice(0, limit) };
 }
 
-export default { test, trending, popular, topRated, details, recommendations, similar, videos, search, discover, genres, externalIds, person, movieBrief, watchProviders, trailerKey, img, imdbTop, topByProvider, providerId, newlyAdded, inCinemasTop, comingSoonCinema, comingSoonProvider, STREAMING };
+export default { test, trending, popular, topRated, details, recommendations, similar, videos, search, find, discover, genres, externalIds, person, movieBrief, watchProviders, trailerKey, img, imdbTop, topByProvider, providerId, newlyAdded, inCinemasTop, comingSoonCinema, comingSoonProvider, STREAMING };

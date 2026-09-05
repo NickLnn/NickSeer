@@ -11,6 +11,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { load } from './config.js';
 import authSvc from './services/auth.js';
+import { startMonitoring } from './services/monitor.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -34,6 +35,8 @@ const statusRouter = await tryRouter('./routes/status.js');
 const requestRouter = await tryRouter('./routes/request.js');
 const healthRouter = await tryRouter('./routes/health.js');
 const requestsRouter = await tryRouter('./routes/requests.js');
+const overseerrRouter = await tryRouter('./routes/overseerr.js');
+const webhookRouter = await tryRouter('./routes/webhook.js');
 
 // Hardened Auth Guard
 app.use((req, res, next) => {
@@ -41,6 +44,7 @@ app.use((req, res, next) => {
   const p = req.path || '';
   if (!c.auth?.enabled) return next();
   if (!p.startsWith('/api')) return next();
+  if (p.startsWith('/api/v1')) return next();
   if (p === '/api/health') return next();
   if (p.startsWith('/api/auth/login') || p.startsWith('/api/auth/status') || p.startsWith('/api/auth/profiles') || p.startsWith('/api/auth/plex')) return next();
   if (p.startsWith('/api/public')) return next();
@@ -70,6 +74,8 @@ if (statusRouter) app.use('/api/status', statusRouter);
 if (requestRouter) app.use('/api/request', requestRouter);
 if (healthRouter) app.use('/api/health-detail', healthRouter);
 if (requestsRouter) app.use('/api/requests', requestsRouter);
+if (webhookRouter) app.use('/api/v1/webhook', webhookRouter);
+if (overseerrRouter) app.use('/api/v1', overseerrRouter);
 
 app.get('/api/health', (req, res) => { const c = load(); res.json({ ok: true, app: c.app.name, configured: !!c.configured }); });
 
@@ -82,6 +88,13 @@ const server = app.listen(PORT, () => {
   authRouter && 'auth', authRolesRouter && 'auth-roles', publicRouter && 'public', settingsRouter && 'settings', discoverRouter && 'discover',
   statusRouter && 'status', requestRouter && 'request', healthRouter && 'health-detail', requestsRouter && 'requests'
 ].filter(Boolean).join(', ')} )`);
+
+  // Start background host health and thermal monitoring
+  try {
+    startMonitoring();
+  } catch (e) {
+    console.warn('[boot] background monitoring start failed:', e.message);
+  }
 
   // Pre-warm caches in the background (non-blocking)
   setTimeout(async () => {
@@ -106,6 +119,20 @@ const server = app.listen(PORT, () => {
       }
     } catch (e) { console.log('[boot] TMDB pre-warm skipped:', e.message); }
   }, 2000);
+
+    // 24-hour interval job to sync Plex
+    setInterval(async () => {
+      try {
+        const plex = await import('./services/plex.js');
+        const plexSvc = plex.default || plex;
+        if (plexSvc.forceScan) {
+          console.log('[sync] Running 24-hour scheduled Plex sync...');
+          await plexSvc.forceScan();
+          console.log('[sync] Scheduled Plex sync complete.');
+        }
+      } catch (e) { console.error('[sync] Scheduled Plex sync failed:', e.message); }
+    }, 24 * 60 * 60 * 1000);
+
 });
 // Graceful shutdown handling for Docker / systemd
 function handleShutdown(signal) {

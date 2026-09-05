@@ -136,6 +136,8 @@ function init() {
   const obs = new MutationObserver(() => { if (isLiveActive() && !document.getElementById('liveView')) render(); });
   obs.observe(app() || document.body, { childList: true, subtree: true });
 }
+    if (isLiveActive() && !document.getElementById('liveView')) render();
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(init, 300));
 else setTimeout(init, 300);
+
 

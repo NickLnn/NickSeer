@@ -6,6 +6,7 @@ import express from '../mini.js';
 import tmdb from '../services/tmdb.js';
 import omdb from '../services/omdb.js';
 import plex from '../services/plex.js';
+import arr from '../services/arr.js';
 import boxoffice from '../services/boxoffice.js';
 import tautulli from '../services/tautulli.js';
 import engine from '../recommend/engine.js';
@@ -29,18 +30,63 @@ function tuning() { const t = load().aiTuning || {}; return { minRating: Number.
 
 router.get('/home', async (req, res) => { try { const userId = req.user?.username || req.user?.plexId || req.query.userId; res.json(await engine.recommend({ userId, force: isForce(req) })); } catch (e) { res.status(200).json({ error: e.message, rows: [] }); } });
 
-router.get('/rows', async (req, res) => { try { res.json(await cached('rows:curated', TTL_DAY, buildCuratedRows, isForce(req))); } catch (e) { res.status(200).json({ error: e.message, rows: [] }); } });
-async function buildCuratedRows() {
+router.get('/rows', async (req, res) => {
+  const media = req.query.media === 'tv' ? 'tv' : 'movie';
+  try { res.json(await cached(`rows:curated:${media}`, TTL_DAY, () => buildCuratedRows(media), isForce(req))); }
+  catch (e) { res.status(200).json({ error: e.message, rows: [] }); }
+});
+async function buildCuratedRows(media = 'movie') {
   const rows = [];
   const push = (title, items, kind, brand) => { if (items && items.length) rows.push({ title, kind, brand, items: items.map(mini) }); };
   const [tm, tv] = await Promise.allSettled([tmdb.trending('movie', 'week'), tmdb.trending('tv', 'week')]);
   if (tm.status === 'fulfilled') push('Trending Movies', (tm.value.results || []).slice(0, 20), 'movie');
   if (tv.status === 'fulfilled') push('Trending Series', (tv.value.results || []).slice(0, 20), 'tv');
-  const results = await Promise.allSettled(tmdb.STREAMING.map((s) => tmdb.topByProvider(s.key, 'movie', 10)));
-  results.forEach((r, i) => { if (r.status === 'fulfilled' && r.value.items.length) push(`${r.value.provider} · Top 10`, r.value.items, 'movie', tmdb.STREAMING[i].key); });
+  const uniqueProviders = Array.from(new Map(tmdb.STREAMING.map((s) => [s.key, s])).values());
+  const results = await Promise.allSettled(uniqueProviders.map((s) => tmdb.topByProvider(s.key, media, 10)));
+  const seen = new Set();
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled' && r.value.items.length) {
+      const brandKey = uniqueProviders[i].key;
+      if (!seen.has(brandKey)) {
+        seen.add(brandKey);
+        push(`${r.value.provider} · Top 10`, r.value.items, media, brandKey);
+      }
+    }
+  });
   if (!rows.length) return { error: 'TMDB not configured or unavailable', rows: [] };
   return { rows };
 }
+
+// Dedicated streaming endpoint with explicit media query support and deduplication
+router.get('/streaming', async (req, res) => {
+  const media = req.query.media === 'tv' ? 'tv' : 'movie';
+  try {
+    const data = await cached(`streaming:${media}`, TTL_DAY, async () => {
+      const uniqueProviders = Array.from(new Map(tmdb.STREAMING.map((s) => [s.key, s])).values());
+      const settled = await Promise.allSettled(uniqueProviders.map((s) => tmdb.topByProvider(s.key, media, 10)));
+      const rows = [];
+      const seen = new Set();
+      settled.forEach((r, i) => {
+        if (r.status === 'fulfilled' && r.value.items.length) {
+          const brandKey = uniqueProviders[i].key;
+          if (!seen.has(brandKey)) {
+            seen.add(brandKey);
+            rows.push({
+              title: `${r.value.provider} · Top 10`,
+              kind: media,
+              brand: brandKey,
+              items: r.value.items.map(mini)
+            });
+          }
+        }
+      });
+      return { rows };
+    }, isForce(req));
+    res.json(data);
+  } catch (e) {
+    res.status(200).json({ error: e.message, rows: [] });
+  }
+});
 
 // batch IMDb ratings (TMDB id → imdb_id → OMDb)
 async function imdbIdFor(media, id) { return cached(`imdbid:${media}:${id}`, 30 * TTL_DAY, async () => { try { const ext = await tmdb.externalIds(media, id); return ext?.imdb_id || null; } catch { return null; } }, false); }
@@ -64,6 +110,60 @@ async function imdbIdFor(media, id) { return cached(`imdbid:${media}:${id}`, 30 
     }
     res.json({ ratings: out });
   });
+
+// batch media status (inLibrary ✓ vs requested ⏳)
+router.post('/media-status', async (req, res) => {
+  const items = (req.body && req.body.items) || [];
+  if (!items.length) return res.json({ statuses: {} });
+
+  try {
+    const [lMap, rCat, sCat] = await Promise.all([
+      libMap(),
+      arr.monitoredCatalog('radarr').catch(() => ({ set: [], titles: {} })),
+      arr.monitoredCatalog('sonarr').catch(() => ({ set: [], titles: {} }))
+    ]);
+
+    const rSet = new Set(rCat?.set || []);
+    const sSet = new Set(sCat?.set || []);
+    const rTitles = rCat?.titles || {};
+    const sTitles = sCat?.titles || {};
+
+    const pendingRequests = (load().requests || []).filter((r) => r.status === 'pending');
+    const pendingIds = new Set(pendingRequests.map((r) => String(r.tmdbId)));
+
+    const statuses = {};
+    for (const item of items.slice(0, 100)) {
+      const id = item.id;
+      if (!id) continue;
+      const sId = String(id);
+      const media = item.media === 'tv' || item.media === 'show' ? 'tv' : 'movie';
+      const key = (media === 'tv' ? 'tv:' : 'movie:') + sId;
+      const titleNorm = item.title ? String(item.title).toLowerCase().replace(/[^a-z0-9]/g, '') : null;
+
+      const inLibrary = Boolean(
+        plex.isMediaInLibrary
+          ? plex.isMediaInLibrary(lMap, { id, media, title: item.title, year: item.year })
+          : lMap[key] || lMap[sId]
+      );
+
+      if (inLibrary) {
+        statuses[sId] = { status: 'in_library', label: 'In library' };
+      } else {
+        const isMonitored = media === 'tv'
+          ? (sSet.has(sId) || (titleNorm && sTitles[titleNorm]))
+          : (rSet.has(sId) || (titleNorm && rTitles[titleNorm]));
+        const isPending = pendingIds.has(sId);
+        if (isMonitored || isPending) {
+          statuses[sId] = { status: 'requested', label: 'Requested' };
+        }
+      }
+    }
+
+    res.json({ statuses });
+  } catch (err) {
+    res.status(200).json({ statuses: {}, error: err.message });
+  }
+});
 
 // real brand logos
 async function tmdbProvidersRaw(media, region) { try { const d = await tmdb.watchProviders(media, region); return d.results || []; } catch { return []; } }
@@ -246,22 +346,26 @@ router.get('/collection/:id', async (req, res) => {
 router.get('/:media/:id', async (req, res) => {
   const { media, id } = req.params;
   try {
-    // Arr lookup (safe: catches if radarr/sonarr not configured)
-      let arrCheck = Promise.resolve(null);
-      try {
-        const arrMod = await import('../services/arr.js');
-        const arrSvc = arrMod.default || arrMod;
-        if (media === 'movie') arrCheck = arrSvc.lookup('radarr', id).catch(() => null);
-        else if (media === 'tv') arrCheck = arrSvc.lookup('sonarr', id).then(r => Array.isArray(r) ? r[0] : null).catch(() => null);
-      } catch { /* arr not configured */ }
+    const kind = media === 'tv' ? 'sonarr' : 'radarr';
+    const [d, map] = await Promise.all([tmdb.details(media, id), libMap()]);
 
-      const [d, map, arrRes] = await Promise.all([tmdb.details(media, id), libMap(), arrCheck]);
-      const isRequested = !!(arrRes && arrRes.id);
+    const titleNorm = (d.title || d.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const isMonitored = await arr.isMonitored(kind, {
+      id: d.id,
+      tmdbId: d.id,
+      tvdbId: d.external_ids?.tvdb_id,
+      title: titleNorm
+    }).catch(() => false);
+
+    const pendingRequests = (load().requests || []).filter((r) => r.status === 'pending');
+    const isPending = pendingRequests.some((r) => String(r.tmdbId) === String(d.id));
+
+    const owned = map[(media === 'tv' ? 'tv:' : 'movie:') + String(d.id)] || null;
+    const isRequested = (isMonitored || isPending) && !owned;
     const yt = (d.videos?.results || []).filter((v) => v.site === 'YouTube');
     const trailer = yt.find((v) => v.type === 'Trailer' && v.official) || yt.find((v) => v.type === 'Trailer') || yt[0];
     const imdbId = d.external_ids?.imdb_id || null;
     let imdb = null;
-    const owned = map[(media === 'tv' ? 'tv:' : 'movie:') + String(d.id)] || null;
     let seriesStatus = null, episodePercent = null, episodesOwned = null, episodesTotal = null;
     if (media === 'tv') { const raw = (d.status || '').toLowerCase(); if (raw.includes('end') || raw.includes('cancel')) seriesStatus = 'ended'; else if (raw.includes('return') || raw.includes('production') || raw.includes('airing')) seriesStatus = 'continuing'; episodesTotal = d.number_of_episodes || null; if (owned && episodesTotal) { episodesOwned = owned.leafCount || 0; episodePercent = Math.max(0, Math.min(100, Math.round((episodesOwned / episodesTotal) * 100))); } }
         const streamingService = detectStreamingService(d, media, load().tmdb?.region || 'US');
@@ -303,10 +407,18 @@ router.get('/:media/:id', async (req, res) => {
       backdrop: tmdb.img(d.backdrop_path, 'original'),
       trailerKey: trailer ? trailer.key : null,
       inLibrary: !!owned,
-        isRequested: isRequested && !owned,
+      isRequested: isRequested && !owned,
       plexUrl,
       libraryServer: owned?.server || 'Plex',
       librarySection: owned?.section || '',
+      status: d.status || null,
+      releaseDate: d.release_date || d.first_air_date || null,
+      revenue: d.revenue != null ? d.revenue : null,
+      budget: d.budget != null ? d.budget : null,
+      originalLanguage: d.original_language || null,
+      spokenLanguages: (d.spoken_languages || []).map((l) => ({ iso_639_1: l.iso_639_1, name: l.name, english_name: l.english_name })),
+      productionCountries: (d.production_countries || []).map((c) => ({ iso_3166_1: c.iso_3166_1, name: c.name })),
+      productionCompanies: (d.production_companies || []).map((c) => ({ id: c.id, name: c.name, logo: tmdb.img(c.logo_path, 'w185') })),
       seriesStatus,
       episodePercent,
       episodesOwned,

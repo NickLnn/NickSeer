@@ -1,9 +1,19 @@
 /* NickSeer Enhancements — Apple typography, real streaming brand logos,
    detail ownership badges, Plex status card, Approvals tab, Seerr-style mobile UX. */
 
+/* Hide scrollbar for Chrome, Safari, and Opera */
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  display: none;
+}
+
+/* Hide scrollbar for IE, Edge, and Firefox */
 html, body {
   font-family: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-tap-highlight-color: transparent;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  overflow-y: auto;
 }
 
 .row-title { font-weight: 700; letter-spacing: -0.02em; font-size: 21px; }
@@ -2501,3 +2511,88 @@ body {
 .own-pill.in-lib.interactive-lib-pill:active {
   transform: translateY(0);
 }
+
+/* Overseerr Movie & Series Metadata Section */
+.overseerr-metadata-card {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(51, 65, 85, 0.5);
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 20px 0 24px 0;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.overseerr-meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 13px 20px;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.4);
+  gap: 16px;
+  transition: background 0.15s ease;
+}
+
+.overseerr-meta-row:last-child {
+  border-bottom: none;
+}
+
+.overseerr-meta-row:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.overseerr-meta-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #f1f5f9;
+  letter-spacing: 0.01em;
+  flex-shrink: 0;
+}
+
+.overseerr-meta-value {
+  font-size: 14px;
+  font-weight: 500;
+  color: #cbd5e1;
+  text-align: right;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  word-break: break-word;
+}
+
+.overseerr-ticket-icon {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  color: #94a3b8;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.overseerr-flag-icon {
+  font-size: 17px;
+  line-height: 1;
+  vertical-align: middle;
+  display: inline-block;
+}
+
+@media (max-width: 640px) {
+  .overseerr-metadata-card {
+    margin: 16px 0 20px 0;
+    border-radius: 10px;
+  }
+  .overseerr-meta-row {
+    padding: 11px 14px;
+    gap: 12px;
+  }
+  .overseerr-meta-label {
+    font-size: 13px;
+  }
+  .overseerr-meta-value {
+    font-size: 13px;
+    max-width: 60%;
+  }
+}
+

@@ -2,7 +2,8 @@
 import fs from 'fs';
 import path from 'path';
 
-const CONFIG_DIR = process.env.CONFIG_DIR || '/config';
+const localConfigDir = path.resolve(process.cwd(), 'config');
+const CONFIG_DIR = process.env.CONFIG_DIR || (process.platform === 'win32' ? localConfigDir : '/config');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'settings.json');
 const BACKUP_FILE = path.join(CONFIG_DIR, 'settings.bak.json');
 const TMP_FILE = path.join(CONFIG_DIR, 'settings.json.tmp');
@@ -32,7 +33,44 @@ const DEFAULTS = {
   plexAuth: { enabled: false, clientId: '' },
   // Pending/approved request queue (for the Approvals tab).
   requests: [],
-  users: []
+  users: [],
+  telegram: {
+    enabled: false,
+    botToken: '',
+    chatId: '',
+    sendSilently: false,
+    systemTempThreshold: 90,
+    types: {
+      pending: true,
+      autoApproved: false,
+      approved: true,
+      declined: false,
+      available: true,
+      failed: false,
+      systemTemp: true,
+      systemCpu: true
+    }
+  },
+  discord: {
+    enabled: false,
+    webhookUrl: '',
+    botUsername: 'NickSeer Bot',
+    botAvatarUrl: '',
+    roleId: '',
+    threadId: '',
+    enableMentions: false,
+    embedPoster: true,
+    types: {
+      pending: true,
+      autoApproved: false,
+      approved: true,
+      declined: false,
+      available: true,
+      failed: false,
+      systemTemp: true,
+      systemCpu: true
+    }
+  }
 };
 
 function deepMerge(base, override) {
@@ -115,6 +153,8 @@ export function redacted() {
   c.services.gluetun.password = mask(c.services.gluetun.password);
   c.tmdb.apiKey = mask(c.tmdb.apiKey); c.tmdb.readToken = mask(c.tmdb.readToken);
   c.omdb.apiKey = mask(c.omdb.apiKey); c.ai.openaiApiKey = mask(c.ai.openaiApiKey);
+  if (c.telegram?.botToken) c.telegram.botToken = mask(c.telegram.botToken);
+  if (c.discord?.webhookUrl) c.discord.webhookUrl = mask(c.discord.webhookUrl);
   if (c.auth) { c.auth.secret = ''; c.auth.users = (c.auth.users || []).map((u) => ({ username: u.username, role: u.role || 'user', plex: !!u.plexId, thumb: u.thumb || '' })); }
   delete c.requests; // large; fetched via its own endpoint
   return c;

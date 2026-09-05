@@ -35,6 +35,83 @@ window.imdbObserver = new IntersectionObserver((entries) => {
     }, 1500);
   }
 }, { rootMargin: '250px' });
+
+// Universal Media Status Prefetcher (In Library & Requested)
+window.mediaStatusCache = window.mediaStatusCache || {};
+const statusPrefetchQueue = new Map();
+let statusPrefetchTimer = null;
+
+export function applyCardStatus(cardEl, statusInfo) {
+  if (!cardEl || !statusInfo) return;
+  const existing = cardEl.querySelector('.card-status-badge');
+  if (existing) existing.remove();
+
+  if (statusInfo.status === 'in_library') {
+    cardEl.classList.add('has-status');
+    const b = el('div', { class: 'card-status-badge in-library' }, [
+      el('span', { style: 'font-weight:900;' }, '✓'),
+      'In library'
+    ]);
+    cardEl.appendChild(b);
+  } else if (statusInfo.status === 'requested') {
+    cardEl.classList.add('has-status');
+    const b = el('div', { class: 'card-status-badge requested' }, [
+      el('span', {}, '⏳'),
+      'Requested'
+    ]);
+    cardEl.appendChild(b);
+  }
+}
+
+window.statusObserver = new IntersectionObserver((entries) => {
+  let needsFetch = false;
+  entries.forEach((entry) => {
+    if (entry.isIntersecting) {
+      const cardEl = entry.target;
+      const id = cardEl.dataset.id;
+      const media = cardEl.dataset.media;
+      if (id && media) {
+        if (window.mediaStatusCache[id]) {
+          applyCardStatus(cardEl, window.mediaStatusCache[id]);
+          window.statusObserver.unobserve(cardEl);
+        } else {
+          statusPrefetchQueue.set(id, { id, media, cardEl });
+          needsFetch = true;
+          window.statusObserver.unobserve(cardEl);
+        }
+      }
+    }
+  });
+
+  if (needsFetch && !statusPrefetchTimer) {
+    statusPrefetchTimer = setTimeout(() => {
+      const itemsWithCards = Array.from(statusPrefetchQueue.values());
+      statusPrefetchQueue.clear();
+      statusPrefetchTimer = null;
+      if (!itemsWithCards.length) return;
+
+      const payload = itemsWithCards.slice(0, 50).map(({ id, media }) => ({ id, media }));
+      fetch('/api/discover/media-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: payload })
+      })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data && data.statuses) {
+          Object.assign(window.mediaStatusCache, data.statuses);
+          itemsWithCards.forEach(({ id, cardEl }) => {
+            if (data.statuses[id]) {
+              applyCardStatus(cardEl, data.statuses[id]);
+            }
+          });
+        }
+      })
+      .catch(() => {});
+    }, 150);
+  }
+}, { rootMargin: '350px' });
+
 document.addEventListener('click', (e) => {
   if (e.target.closest('button, .card, .nav-link, .bottom-nav-item, .drawer-item, .tag-chip, .appr-subtab, .appr-btn, .icon-btn')) {
     if (navigator.vibrate) navigator.vibrate(40);
@@ -54,7 +131,7 @@ document.addEventListener('click', (e) => {
 //  2) Search no longer steals focus onto the first result while you're still
 //     typing/paused (was causing an unwanted "jump" on desktop AND mobile).
 //     Focus into results now only happens on an intentional ArrowDown/Enter.
-import { toast, el, api, stars, authToken , escHTML} from './util.js';
+import { toast, el, api, stars, authToken , escHTML, hasCache } from './util.js';
 import { openSettings } from './settings.js';
 import { setFocus } from './nav.js';
 const app = document.getElementById('app');
@@ -62,7 +139,27 @@ const ambient = document.getElementById('ambient');
 let currentView = 'home';
 let rowsCache = null;
 let slideTimer = null;
-const mediaToggle = { new: 'movie', coming: 'movie' };
+let currentViewSeq = 0;
+const mediaToggle = { streaming: 'movie', new: 'movie', coming: 'movie' };
+
+// Automatically suppress intrusive third-party browser extension widgets (e.g. Adobe Acrobat floating toolbar)
+try {
+  const cleanExtensionWidgets = () => {
+    document.querySelectorAll('adobe-acrobat-pdf-viewer, [id*="adobe-acrobat"], [class*="adobe-acrobat"], [id*="adobe_dc_"], [class*="adobe_dc_"]').forEach((el) => el.remove());
+    document.querySelectorAll('body > div, body > aside, body > section').forEach((el) => {
+      if (el.id !== 'app' && el.id !== 'ambient' && el.id !== 'modal' && !el.classList?.contains('topbar')) {
+        const txt = el.textContent || '';
+        if (txt.includes('Adobe Acrobat') || txt.includes('Summarize with AI') || txt.includes('Convert to PDF') || txt.includes('Ask AI about page')) {
+          el.remove();
+        }
+      }
+    });
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', cleanExtensionWidgets);
+  else cleanExtensionWidgets();
+  const extObserver = new MutationObserver(() => cleanExtensionWidgets());
+  extObserver.observe(document.body, { childList: true });
+} catch (_) {}
 
 // ---------- brand logos ----------
 const BRANDS = {
@@ -416,8 +513,10 @@ export async function updateRoleVisibility() {
   return isAdmin;
 }
 async function showView(view, force = false) {
+  const seq = ++currentViewSeq;
   if (['info', 'live'].includes(view)) {
     const isAdmin = await updateRoleVisibility();
+    if (seq !== currentViewSeq) return;
     if (!isAdmin) {
       toast('Admin only', 'bad');
       showView('home');
@@ -426,7 +525,22 @@ async function showView(view, force = false) {
   }
   currentView = view;
   stopSlideshow();
-  app.innerHTML = skeleton();
+  let route = '';
+  if (view === 'home') route = '/api/discover/library';
+  else if (view === 'movies') route = '/api/discover/movies';
+  else if (view === 'tv') route = '/api/discover/tv';
+  else if (view === 'new') route = '/api/discover/new';
+  else if (view === 'boxoffice') route = '/api/discover/boxoffice';
+  else if (view === 'coming') route = '/api/discover/coming';
+  else if (view === 'requests') route = '/api/requests';
+  
+  if (!force && route && hasCache(route)) {
+    // SWR: Don't show skeleton, let it render instantly from cache
+  } else {
+    if (!['info', 'live', 'status'].includes(view)) {
+      app.innerHTML = skeleton();
+    }
+  }
 
   // Remember active view across refreshes & update URL hash seamlessly
   try {
@@ -444,15 +558,16 @@ async function showView(view, force = false) {
   });
 
   try {
-    if (view === 'home') await renderHome(force);
-    else if (view === 'movies') await renderCategory('movie', force);
-    else if (view === 'shows') await renderCategory('tv', force);
-    else if (view === 'streaming') await renderStreaming(force);
-    else if (view === 'new') await renderNew(force);
-    else if (view === 'boxoffice') await renderBoxOffice(force);
-    else if (view === 'coming') await renderComing(force);
+    if (view === 'home') await renderHome(force, seq);
+    else if (view === 'movies') await renderCategory('movie', force, seq);
+    else if (view === 'shows') await renderCategory('tv', force, seq);
+    else if (view === 'streaming') await renderStreaming(force, seq);
+    else if (view === 'new') await renderNew(force, seq);
+    else if (view === 'boxoffice') await renderBoxOffice(force, seq);
+    else if (view === 'coming') await renderComing(force, seq);
     else if (view === 'status') await renderStatus();
   } catch (e) {
+    if (seq !== currentViewSeq) return;
     app.innerHTML = '';
     app.appendChild(emptyState('Something went wrong', e.message));
   }
@@ -466,12 +581,15 @@ window.addEventListener('hashchange', () => {
   }
 });
 async function getRows(force) { if (rowsCache && !force) return rowsCache; rowsCache = await api('/api/discover/rows' + (force ? '?refresh=1' : '')); return rowsCache; }
-async function renderHome(force) {
+async function renderHome(force, seq) {
   try {
     const [home, curated] = await Promise.all([
       api('/api/discover/home' + userQuery(force ? 'refresh=1' : '')).catch(() => ({ rows: [] })),
       getRows(force).catch(() => ({ rows: [] }))
     ]);
+
+    if (seq && seq !== currentViewSeq) return;
+    if (currentView !== 'home') return;
 
     app.innerHTML = '';
     const persoRows = home?.rows || [];
@@ -541,20 +659,20 @@ function renderMovieTabsHeader(activeTab, onSwitch) {
   return head;
 }
 
-async function renderCategory(media, force) {
+async function renderCategory(media, force, seq) {
   if (media === 'movie') {
-    app.innerHTML = '';
-    const header = renderMovieTabsHeader(movieSubTab, (tab) => {
-      movieSubTab = tab;
-      renderCategory('movie', false);
-    });
-    app.appendChild(header);
-
     if (movieSubTab === 'collections') {
+      if (seq && seq !== currentViewSeq) return;
+      if (currentView !== 'movies') return;
+      app.innerHTML = '';
+      const header = renderMovieTabsHeader(movieSubTab, (tab) => {
+        movieSubTab = tab;
+        renderCategory('movie', false, currentViewSeq);
+      });
+      app.appendChild(header);
       const colDiv = el('div', { id: 'moviesColSubView' });
       app.appendChild(colDiv);
       if (window.renderCollectionsView) {
-        // Render collections view inside the app container below the subtabs
         await renderCollectionsContent(colDiv, force);
       }
       return;
@@ -564,6 +682,17 @@ async function renderCategory(media, force) {
       api('/api/discover/trending' + (force ? '?refresh=1' : '')),
       api('/api/discover/imdb-top?media=movie' + (force ? '&refresh=1' : ''))
     ]);
+
+    if (seq && seq !== currentViewSeq) return;
+    if (currentView !== 'movies') return;
+
+    app.innerHTML = '';
+    const header = renderMovieTabsHeader(movieSubTab, (tab) => {
+      movieSubTab = tab;
+      renderCategory('movie', false, currentViewSeq);
+    });
+    app.appendChild(header);
+
     const trlist = trend.movies || [];
     const trItems = trlist.map((c) => normalize(c, 'movie'));
     if (trItems.slice(0, 7).length) app.appendChild(heroSlideshow(trItems.slice(0, 7)));
@@ -577,6 +706,10 @@ async function renderCategory(media, force) {
     api('/api/discover/trending' + (force ? '?refresh=1' : '')),
     api(`/api/discover/imdb-top?media=${media}` + (force ? '&refresh=1' : ''))
   ]);
+
+  if (seq && seq !== currentViewSeq) return;
+  if (currentView !== 'shows') return;
+
   app.innerHTML = '';
   const trlist = trend.tv || [];
   const trItems = trlist.map((c) => normalize(c, media));
@@ -652,17 +785,41 @@ function createCollectionCardEl(col) {
   card.setAttribute('data-nav', '');
   card.tabIndex = 0;
 
-  const pct = col.completionPercent || 0;
-  const isComplete = col.missing === 0 && col.owned > 0;
-  const isIncomplete = col.owned > 0 && col.missing > 0;
+  // Aggregate status from individual child movies when direct parent mapping is absent
+  const parts = Array.isArray(col.parts) ? col.parts : [];
+  const total = typeof col.total === 'number' ? col.total : parts.length;
+  const owned = typeof col.owned === 'number' ? col.owned : parts.filter(p => p.inLibrary).length;
+  const pending = typeof col.pending === 'number' ? col.pending : parts.filter(p => p.isPending).length;
+  const missing = typeof col.missing === 'number' ? col.missing : Math.max(0, total - owned);
+  const unrequested = typeof col.unrequested === 'number' ? col.unrequested : Math.max(0, total - owned - pending);
+  const pct = total > 0 ? Math.round((owned / total) * 100) : (col.completionPercent || 0);
+
+  const isComplete = total > 0 && owned === total;
+  const isPartial = owned > 0 && owned < total;
+  const isUnowned = owned === 0;
 
   let badgeHtml = '';
   if (isComplete) {
-    badgeHtml = `<span class="col-badge complete">✓ Complete (${col.total}/${col.total})</span>`;
-  } else if (isIncomplete) {
-    badgeHtml = `<span class="col-badge incomplete">⚡ ${col.owned}/${col.total} in Library · ${col.missing} Missing</span>`;
+    badgeHtml = `<span class="col-badge complete">✓ In Library (${total}/${total})</span>`;
+  } else if (isPartial) {
+    if (unrequested === 0 && pending > 0) {
+      badgeHtml = `<span class="col-badge complete" style="background:rgba(245,197,24,0.88);color:#1a1500;box-shadow:0 2px 8px rgba(245,197,24,0.4);">⏳ ${owned}/${total} in Library · ${pending} Requested</span>`;
+    } else {
+      badgeHtml = `<span class="col-badge incomplete">⚡ ${owned}/${total} in Library · ${unrequested} Missing</span>`;
+    }
   } else {
-    badgeHtml = `<span class="col-badge unowned">${col.total} Movies</span>`;
+    badgeHtml = `<span class="col-badge unowned">${total} Movies</span>`;
+  }
+
+  let statusText = '';
+  if (isUnowned) {
+    statusText = 'Not in library';
+  } else if (isComplete) {
+    statusText = `In library (${total}/${total})`;
+  } else if (unrequested === 0 && pending > 0) {
+    statusText = `${owned} / ${total} in library · ${pending} Requested`;
+  } else {
+    statusText = `${owned} / ${total} in library`;
   }
 
   const posterImg = col.poster || col.backdrop || '/favicon.svg';
@@ -680,7 +837,7 @@ function createCollectionCardEl(col) {
     </div>
     <div class="col-info">
       <div class="col-title" title="${col.name}">${col.name}</div>
-      <div class="col-meta">${col.total} Parts · ${col.owned > 0 ? col.owned + ' Owned' : 'Not in library'}</div>
+      <div class="col-meta">${total} Parts · ${statusText}</div>
     </div>
   `;
 
@@ -688,27 +845,46 @@ function createCollectionCardEl(col) {
   card.onkeydown = (e) => { if (e.key === 'Enter' && window.openCollectionModal) window.openCollectionModal(col.id); };
   return card;
 }
-async function renderStreaming(force) {
-  const curated = await getRows(force);
+async function renderStreaming(force, seq) {
+  const media = mediaToggle.streaming || 'movie';
+  let data = await api(`/api/discover/streaming?media=${media}` + (force ? '&refresh=1' : '')).catch(() => null);
+  if (!data || !data.rows || !data.rows.length) {
+    data = await api(`/api/discover/rows?media=${media}` + (force ? '&refresh=1' : '')).catch(() => ({ rows: [] }));
+  }
+  if (seq && seq !== currentViewSeq) return;
+  if (currentView !== 'streaming') return;
   app.innerHTML = '';
-  const streamRows = (curated.rows || []).filter((r) => isTop(r.title));
-  if (!streamRows.length) { app.appendChild(emptyState('No streaming charts yet', curated.error || 'Add your TMDB key and region in Settings.', true)); return; }
+  app.appendChild(tabHeader('Top 10 on Streaming', media, (m) => {
+    mediaToggle.streaming = m;
+    renderStreaming(false, currentViewSeq);
+  }));
+  const rawRows = (data.rows || []).filter((r) => isTop(r.title));
+  // Ensure provider rows are distinct by provider ID / key / brand
+  const streamRows = Array.from(
+    new Map(rawRows.map((r) => [r.brand || r.title.replace(/ · Top 10$/i, '').trim().toLowerCase(), r])).values()
+  );
+  if (!streamRows.length) {
+    app.appendChild(emptyState(`No ${media === 'tv' ? 'TV series' : 'movie'} streaming charts yet`, data.error || 'Add your TMDB key and region in Settings.', true));
+    return;
+  }
   if ((streamRows[0]?.items || []).slice(0, 7).length) app.appendChild(heroSlideshow(streamRows[0].items.slice(0, 7)));
-      const fns = [];
-    for (const row of streamRows) fns.push(() => rowEl(row.title, row.items, false, true, row.brand));
-    const renderChunk = (start, count) => {
-      const chunk = fns.slice(start, start + count);
-      for (const fn of chunk) app.appendChild(fn());
-      if (start + count < fns.length) requestAnimationFrame(() => setTimeout(() => renderChunk(start + count, count), 20));
-    };
-    renderChunk(0, 3);
+  const fns = [];
+  for (const row of streamRows) fns.push(() => rowEl(row.title, row.items, false, true, row.brand));
+  const renderChunk = (start, count) => {
+    const chunk = fns.slice(start, start + count);
+    for (const fn of chunk) app.appendChild(fn());
+    if (start + count < fns.length) requestAnimationFrame(() => setTimeout(() => renderChunk(start + count, count), 20));
+  };
+  renderChunk(0, 3);
   focusFirstCard();
 }
-async function renderNew(force) {
+async function renderNew(force, seq) {
   const media = mediaToggle.new;
   const data = await api(`/api/discover/new?media=${media}` + (force ? '&refresh=1' : ''));
+  if (seq && seq !== currentViewSeq) return;
+  if (currentView !== 'new') return;
   app.innerHTML = '';
-  app.appendChild(tabHeader('Newly Added', media, (m) => { mediaToggle.new = m; renderNew(false); }));
+  app.appendChild(tabHeader('Newly Added', media, (m) => { mediaToggle.new = m; renderNew(false, currentViewSeq); }));
   const rows = data.rows || [];
   if (!rows.length) { app.appendChild(emptyState('Nothing new found', data.error || 'Add your TMDB key and region in Settings.', true)); return; }
   if ((rows[0]?.items || []).slice(0, 7).length) app.appendChild(heroSlideshow(rows[0].items.slice(0, 7)));
@@ -722,8 +898,10 @@ async function renderNew(force) {
     renderChunk(0, 3);
   focusFirstCard();
 }
-async function renderBoxOffice(force) {
+async function renderBoxOffice(force, seq) {
   const data = await api('/api/discover/boxoffice' + (force ? '?refresh=1' : ''));
+  if (seq && seq !== currentViewSeq) return;
+  if (currentView !== 'boxoffice') return;
   app.innerHTML = '';
   const realBom = data.source === 'box-office-mojo';
   app.appendChild(el('div', { class: 'row-head' }, [
@@ -745,6 +923,11 @@ function boxOfficeCard(it, rank) {
       c.dataset.id = it.id;
       c.dataset.media = 'movie';
       if (window.imdbObserver) window.imdbObserver.observe(c);
+      if (window.mediaStatusCache && window.mediaStatusCache[it.id]) {
+        applyCardStatus(c, window.mediaStatusCache[it.id]);
+      } else if (window.statusObserver) {
+        window.statusObserver.observe(c);
+      }
     }
     c.addEventListener('click', () => openDetail(it));
   if (it.poster) c.appendChild(el('img', { class: 'card-poster', src: it.poster, loading: 'lazy', alt: it.title, onload: (e) => e.target.classList.add('fade-in') }));
@@ -756,11 +939,13 @@ function boxOfficeCard(it, rank) {
   c.appendChild(el('div', { class: 'card-info' }, [el('div', { class: 'card-name' }, it.title), el('div', { class: 'card-year' }, [it.weeks ? `wk ${it.weeks} · ` : '', totalLine].join(''))]));
   return c;
 }
-async function renderComing(force) {
+async function renderComing(force, seq) {
   const media = mediaToggle.coming;
   const data = await api(`/api/discover/anticipated?media=${media}` + (force ? '&refresh=1' : ''));
+  if (seq && seq !== currentViewSeq) return;
+  if (currentView !== 'coming') return;
   app.innerHTML = '';
-  app.appendChild(tabHeader('Highly Anticipated', media, (m) => { mediaToggle.coming = m; renderComing(false); }));
+  app.appendChild(tabHeader('Highly Anticipated', media, (m) => { mediaToggle.coming = m; renderComing(false, currentViewSeq); }));
   const rows = data.rows || [];
   if (!rows.length) { app.appendChild(emptyState('Nothing upcoming yet', data.error || 'Add your TMDB key and region in Settings.', true)); return; }
   if ((rows[0]?.items || []).slice(0, 7).length) app.appendChild(heroSlideshow(rows[0].items.slice(0, 7)));
@@ -835,7 +1020,16 @@ function heroSlideshow(items) {
     content.appendChild(el('h1', { class: 'hero-title' }, it.title));
     content.appendChild(el('div', { class: 'hero-meta' }, [it.year ? el('span', {}, it.year) : null, it.rating ? el('span', { style: 'color:var(--gold)' }, stars(it.rating)) : null, it.weekend ? el('span', { class: 'vpn-pill' }, it.weekend + ' weekend') : null, it.total ? el('span', { class: 'chip' }, `${it.total} ${it.totalKind === 'worldwide' ? '🌍' : ''}`) : null, el('span', { class: 'chip' }, it.media === 'tv' ? 'TV' : 'Movie')]));
     if (it.overview) content.appendChild(el('p', { class: 'hero-overview' }, it.overview));
-    content.appendChild(el('div', { class: 'hero-actions' }, [el('button', { class: 'btn btn-primary', 'data-nav': '', onclick: () => openDetail(it) }, '▶  Trailer & Details'), el('button', { class: 'btn btn-accent', 'data-nav': '', onclick: () => openRequestModal(it) }, '＋  Request')]));
+    let heroReqBtn = el('button', { class: 'btn btn-accent', 'data-nav': '', onclick: () => openRequestModal(it) }, '＋  Request');
+    if (window.mediaStatusCache && window.mediaStatusCache[it.id]) {
+      const st = window.mediaStatusCache[it.id];
+      if (st.status === 'in_library') {
+        heroReqBtn = el('button', { class: 'btn btn-owned', 'data-nav': '', disabled: true, style: 'opacity:0.8;cursor:default;background:rgba(53,208,127,.18);color:#35d07f;border:1px solid rgba(53,208,127,.4)' }, '✔  In Library');
+      } else if (st.status === 'requested') {
+        heroReqBtn = el('button', { class: 'btn btn-requested', 'data-nav': '', disabled: true, style: 'opacity:0.8;cursor:default;background:rgba(245,197,24,.18);color:#f5c518;border:1px solid rgba(245,197,24,.4)' }, '⏳  Requested');
+      }
+    }
+    content.appendChild(el('div', { class: 'hero-actions' }, [el('button', { class: 'btn btn-primary', 'data-nav': '', onclick: () => openDetail(it) }, '▶  Trailer & Details'), heroReqBtn]));
     slides.forEach((s, i) => s.classList.toggle('on', i === idx));
     dotEls.forEach((d, i) => d.classList.toggle('on', i === idx));
   };
@@ -867,9 +1061,15 @@ function rowSub(text) { return el('div', { class: 'row-sub', style: 'padding:0 4
 function card(item, rank) {
       const c = el('div', { class: 'card', tabindex: '0', 'data-nav': '' });
     if (item.id) {
+      const media = item.media === 'tv' || item.media === 'show' || item.first_air_date ? 'tv' : 'movie';
       c.dataset.id = item.id;
-      c.dataset.media = item.media === 'tv' || item.media === 'show' || item.first_air_date ? 'tv' : 'movie';
+      c.dataset.media = media;
       if (window.imdbObserver) window.imdbObserver.observe(c);
+      if (window.mediaStatusCache && window.mediaStatusCache[item.id]) {
+        applyCardStatus(c, window.mediaStatusCache[item.id]);
+      } else if (window.statusObserver) {
+        window.statusObserver.observe(c);
+      }
     }
     c.addEventListener('click', () => openDetail(item));
   if (item.poster) c.appendChild(el('img', { class: 'card-poster', src: item.poster, loading: 'lazy', alt: item.title, onload: (e) => e.target.classList.add('fade-in') }));
@@ -892,7 +1092,7 @@ function downloadRow(name, percent, timeLeft) {
 }
 // ---------- detail modal (with ownership badges) ----------
 window.openDetail = openDetail;
-async function openDetail(item) {
+export async function openDetail(item) {
   const modal = document.getElementById('modal');
   const cardEl = document.getElementById('modalCard');
   modal.classList.remove('hidden');
@@ -902,6 +1102,18 @@ async function openDetail(item) {
   if (!item.id) { cardEl.innerHTML = `<div style="padding:40px">No TMDB match for "${item.title}".</div>`; return; }
   const d = await api(`/api/discover/${media}/${item.id}`);
   if (d.error) { cardEl.innerHTML = `<div style="padding:40px">${escHTML(d.error)}</div>`; return; }
+  
+  // Sync status with client cache and existing cards
+  if (window.mediaStatusCache) {
+    if (d.inLibrary) {
+      window.mediaStatusCache[d.id] = { status: 'in_library', label: 'In library' };
+      document.querySelectorAll(`.card[data-id="${d.id}"]`).forEach((c) => applyCardStatus(c, { status: 'in_library', label: 'In library' }));
+    } else if (d.isRequested) {
+      window.mediaStatusCache[d.id] = { status: 'requested', label: 'Requested' };
+      document.querySelectorAll(`.card[data-id="${d.id}"]`).forEach((c) => applyCardStatus(c, { status: 'requested', label: 'Requested' }));
+    }
+  }
+
   setAmbient(d.backdrop);
   const media_label = media === 'tv' ? 'TV' : 'Movie';
   cardEl.innerHTML = '';
@@ -969,9 +1181,9 @@ async function openDetail(item) {
   }
       let reqBtn;
     if (d.inLibrary) {
-      reqBtn = el('button', { class: 'btn btn-owned', 'data-nav': '', disabled: true, style: 'opacity:0.7;cursor:default;background:rgba(53,208,127,.15);color:#35d07f;border:1px solid rgba(53,208,127,.4)' }, [el('span',{},'✔'), '  In Library']);
+      reqBtn = el('button', { class: 'btn btn-owned', 'data-nav': '', disabled: true, style: 'opacity:0.8;cursor:default;background:rgba(53,208,127,.18);color:#35d07f;border:1px solid rgba(53,208,127,.4)' }, [el('span',{},'✔'), '  In Library']);
     } else if (d.isRequested) {
-      reqBtn = el('button', { class: 'btn btn-requested', 'data-nav': '', disabled: true, style: 'opacity:0.7;cursor:default;background:rgba(245,197,24,.15);color:#f5c518;border:1px solid rgba(245,197,24,.4)' }, [el('span',{},'✔'), '  Requested']);
+      reqBtn = el('button', { class: 'btn btn-requested', 'data-nav': '', disabled: true, style: 'opacity:0.85;cursor:default;background:rgba(245,197,24,.18);color:#f5c518;border:1px solid rgba(245,197,24,.45)' }, [el('span',{},'⏳'), '  Requested']);
     } else {
       reqBtn = el('button', { class: 'btn btn-accent', 'data-nav': '', onclick: () => openRequestModal({ ...item, media, title: d.title, backdrop: d.backdrop }) }, '＋  Request');
     }
@@ -995,6 +1207,133 @@ async function openDetail(item) {
     ]);
   }
 
+function countryFlag(code) {
+  if (!code || code.length !== 2) return '';
+  const c = code.toUpperCase();
+  try {
+    return String.fromCodePoint(127397 + c.charCodeAt(0), 127397 + c.charCodeAt(1));
+  } catch (e) {
+    return '';
+  }
+}
+
+function resolveCountry(countries) {
+  if (!countries || !countries.length) return { flag: '🇺🇸', name: 'United States' };
+  const c = countries[0];
+  const iso = (typeof c === 'string' ? c : c.iso_3166_1 || c.iso || 'US').toUpperCase();
+  let name = (typeof c === 'object' ? c.name : '') || '';
+  if (iso && (!name || name === 'United States of America')) {
+    try {
+      name = new Intl.DisplayNames(['en'], { type: 'region' }).of(iso) || name;
+    } catch (e) {}
+  }
+  if (name === 'United States of America') name = 'United States';
+  return { flag: countryFlag(iso) || '🇺🇸', name: name || 'United States' };
+}
+
+function resolveLanguage(langCode, spokenList) {
+  const code = String(langCode || 'en').toLowerCase();
+  if (spokenList && spokenList.length) {
+    const hit = spokenList.find(s => (s.iso_639_1 || '').toLowerCase() === code);
+    if (hit && (hit.english_name || hit.name)) return hit.english_name || hit.name;
+  }
+  try {
+    const dn = new Intl.DisplayNames(['en'], { type: 'language' });
+    const name = dn.of(code);
+    if (name) return name.charAt(0).toUpperCase() + name.slice(1);
+  } catch (e) {}
+  return code === 'en' ? 'English' : code.toUpperCase();
+}
+
+function resolveStudio(companies, streamingService) {
+  if (companies && companies.length) {
+    const first = companies[0];
+    const name = (typeof first === 'string' ? first : first.name);
+    if (name) return name;
+  }
+  if (streamingService && streamingService.name) return streamingService.name;
+  return 'N/A';
+}
+
+function renderMetadataBlock(d, media) {
+  const rows = [];
+
+  const makeRow = (label, valueNode) => {
+    return el('div', { class: 'overseerr-meta-row' }, [
+      el('div', { class: 'overseerr-meta-label' }, label),
+      typeof valueNode === 'string' ? el('div', { class: 'overseerr-meta-value' }, valueNode) : valueNode
+    ]);
+  };
+
+  // 1. Status
+  const status = d.status || (media === 'movie' ? 'Released' : (d.seriesStatus === 'ended' ? 'Ended' : 'Returning Series'));
+  rows.push(makeRow('Status', status));
+
+  // 2. Release Date
+  const rawDate = d.releaseDate || d.release_date || d.first_air_date || (d.year ? `${d.year}-01-01` : null);
+  let formattedDate = 'N/A';
+  if (rawDate) {
+    try {
+      const parts = String(rawDate).split('T')[0].split('-');
+      if (parts.length === 3) {
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10) - 1;
+        const day = parseInt(parts[2], 10);
+        const dt = new Date(Date.UTC(y, m, day));
+        formattedDate = dt.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+      } else {
+        formattedDate = rawDate;
+      }
+    } catch (e) {
+      formattedDate = rawDate;
+    }
+  }
+  const ticketSvg = el('span', {
+    class: 'overseerr-ticket-icon',
+    html: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z"/></svg>'
+  });
+  rows.push(makeRow('Release Date', el('div', { class: 'overseerr-meta-value' }, [
+    ticketSvg,
+    el('span', {}, formattedDate)
+  ])));
+
+  // 3. Revenue (movies only or if revenue > 0)
+  if (media !== 'tv') {
+    const revFormatted = (!d.revenue || d.revenue <= 0) ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(d.revenue);
+    rows.push(makeRow('Revenue', revFormatted));
+  } else if (d.revenue && d.revenue > 0) {
+    const revFormatted = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(d.revenue);
+    rows.push(makeRow('Revenue', revFormatted));
+  }
+
+  // 4. Budget (movies only or if budget > 0)
+  if (media !== 'tv') {
+    const budFormatted = (!d.budget || d.budget <= 0) ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(d.budget);
+    rows.push(makeRow('Budget', budFormatted));
+  } else if (d.budget && d.budget > 0) {
+    const budFormatted = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(d.budget);
+    rows.push(makeRow('Budget', budFormatted));
+  }
+
+  // 5. Original Language
+  const langName = resolveLanguage(d.originalLanguage || d.original_language, d.spokenLanguages || d.spoken_languages);
+  rows.push(makeRow('Original Language', langName));
+
+  // 6. Production Country
+  const country = resolveCountry(d.productionCountries || d.production_countries);
+  const countryValNode = el('div', { class: 'overseerr-meta-value' }, [
+    country.flag ? el('span', { class: 'overseerr-flag-icon' }, country.flag) : null,
+    el('span', {}, country.name)
+  ]);
+  rows.push(makeRow('Production Country', countryValNode));
+
+  // 7. Studio
+  const studio = resolveStudio(d.productionCompanies || d.production_companies, d.streamingService);
+  rows.push(makeRow('Studio', studio));
+
+  return el('div', { class: 'overseerr-metadata-card' }, rows);
+}
+
   const body = el('div', { class: 'modal-body' }, [
     titleRow,
     d.tagline ? el('div', { class: 'modal-tagline' }, d.tagline) : null,
@@ -1002,7 +1341,8 @@ async function openDetail(item) {
     colChip,
     item.why ? el('div', { class: 'why-chip', style: 'position:static;display:inline-block;margin-bottom:12px' }, '✨ ' + item.why) : null,
     el('p', { class: 'modal-overview' }, d.overview || 'No description available.'),
-    actions
+    actions,
+    renderMetadataBlock(d, media)
   ]);
   if (d.cast && d.cast.length) {
     body.appendChild(el('div', { class: 'section-label' }, 'Cast · tap an actor'));
@@ -1167,6 +1507,16 @@ async function openRequestModal(item) {
       seasons: selectedSeasons
     };
     const r = await api('/api/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (r.ok || r.code === 'exists') {
+      const statusType = r.code === 'exists' ? 'in_library' : 'requested';
+      const labelText = r.code === 'exists' ? 'In library' : 'Requested';
+      if (window.mediaStatusCache) {
+        window.mediaStatusCache[payload.tmdbId] = { status: statusType, label: labelText };
+      }
+      document.querySelectorAll(`.card[data-id="${payload.tmdbId}"]`).forEach((c) => {
+        applyCardStatus(c, { status: statusType, label: labelText });
+      });
+    }
     if (r.ok && r.code === 'pending') showRequestResult(cardEl, item, { kind: r.kind, state: 'pending' });
     else if (r.ok) showRequestResult(cardEl, item, { kind: r.kind, state: 'added' });
     else if (r.code === 'exists') showRequestResult(cardEl, item, { kind: r.kind, state: 'exists' });

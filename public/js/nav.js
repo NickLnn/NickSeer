@@ -122,6 +122,10 @@ function candidatesInDirection(items, cur, dir) {
   return { strict, loose };
 }
 
+let lastNavTime = 0;
+let lastKeyNavTime = 0;
+const NAV_COOLDOWN_MS = 110;
+
 function move(dir) {
   const items = focusable();
   if (!items.length) return;
@@ -131,21 +135,47 @@ function move(dir) {
   const horizontal = dir === 'left' || dir === 'right';
   const curSection = sectionOf(cur);
 
-  // PASS 1 — try to stay inside the current section first (this is the fix:
-  // a slideshow's dots/arrows, or a row's cards, no longer "leak" focus to
-  // unrelated sections just because something else happens to be closer in
-  // raw page coordinates).
+  // PASS 1 — try to stay inside the current section first
   if (curSection) {
     const sectionItems = items.filter((el) => curSection.contains(el));
+
+    // Precise, sequential 1-by-1 step navigation for linear rows / sliders
+    // (e.g. .row-scroll, .col-row-scroller, .cast-row, or .row)
+    const isRowContainer = curSection.classList.contains('row-scroll') ||
+                           curSection.classList.contains('col-row-scroller') ||
+                           curSection.classList.contains('cast-row') ||
+                           curSection.classList.contains('row') ||
+                           Boolean(curSection.querySelector && curSection.querySelector('.row-scroll, .col-row-scroller, .cast-row'));
+
+    if (horizontal && isRowContainer && sectionItems.length > 1) {
+      let curIdx = sectionItems.indexOf(cur);
+      if (curIdx === -1) {
+        curIdx = sectionItems.findIndex((el) => el.contains(cur) || cur.contains(el));
+      }
+      if (curIdx !== -1) {
+        if (dir === 'right' && curIdx < sectionItems.length - 1) {
+          setFocus(sectionItems[curIdx + 1]);
+          return;
+        } else if (dir === 'left' && curIdx > 0) {
+          setFocus(sectionItems[curIdx - 1]);
+          return;
+        }
+        return; // at edge of row: stay contained horizontally
+      }
+    }
+
     const { strict, loose } = candidatesInDirection(sectionItems, cur, dir);
-    if (strict.length) { strict.sort((x, y) => (x.primary * 1.5 + x.secondary) - (y.primary * 1.5 + y.secondary)); setFocus(strict[0].el); return; }
-    // For horizontal movement specifically, do NOT fall through to "loose"
-    // matches outside the section — that's exactly the jump we're fixing.
-    // Only vertical movement (up/down) is allowed to leave the section when
-    // there's nothing left inside it, since that's how you reach the next
-    // row / the nav bar on purpose.
+    if (strict.length) {
+      strict.sort((x, y) => (x.primary * 1.5 + x.secondary) - (y.primary * 1.5 + y.secondary));
+      setFocus(strict[0].el);
+      return;
+    }
     if (horizontal) {
-      if (loose.length) { loose.sort((x, y) => (x.primary + x.secondary * 2.5) - (y.primary + y.secondary * 2.5)); setFocus(loose[0].el); return; }
+      if (loose.length) {
+        loose.sort((x, y) => (x.primary + x.secondary * 2.5) - (y.primary + y.secondary * 2.5));
+        setFocus(loose[0].el);
+        return;
+      }
       return; // nothing further in this direction inside the section — stop.
     }
   }
@@ -179,8 +209,7 @@ function isTyping() {
   return isTypingElement(document.activeElement);
 }
 
-// TV Remote & keyboard key handler
-document.addEventListener('keydown', (e) => {
+function handleKeydown(e) {
   const typing = isTyping();
   const key = e.key;
   const code = e.keyCode || e.which;
@@ -209,11 +238,11 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (isEnterKey) {
-    if (window._navCurrent && !typing) {
-      // Don't double-trigger button/submit if activeElement is already it
-      if (document.activeElement !== window._navCurrent) {
+    if (!typing) {
+      const target = window._navCurrent || (document.activeElement && document.activeElement !== document.body ? document.activeElement : null);
+      if (target && typeof target.click === 'function') {
         e.preventDefault();
-        window._navCurrent.click();
+        target.click();
       }
     }
     return;
@@ -221,16 +250,34 @@ document.addEventListener('keydown', (e) => {
   // While typing, arrow keys must move the text caret, not spatial focus —
   // ONLY exception: ArrowDown/Enter is handled by app.js's search box itself
   // to intentionally jump into results (see app.js's own keydown listener).
-  if (isRight && !typing) { e.preventDefault(); move('right'); return; }
-  if (isLeft && !typing) { e.preventDefault(); move('left'); return; }
-  if (isDown && !typing) { e.preventDefault(); move('down'); return; }
-  if (isUp && !typing) { e.preventDefault(); move('up'); return; }
-});
-// Update nav focus on hover for mouse/touch pointer
-document.addEventListener('mouseover', (e) => {
+  if ((isRight || isLeft || isDown || isUp) && !typing) {
+    e.preventDefault();
+    const now = performance.now();
+    if (now - lastNavTime < NAV_COOLDOWN_MS) return;
+    lastNavTime = now;
+    lastKeyNavTime = now;
+    if (isRight) move('right');
+    else if (isLeft) move('left');
+    else if (isDown) move('down');
+    else if (isUp) move('up');
+    return;
+  }
+}
+
+function handleMouseover(e) {
   if (window.matchMedia && !window.matchMedia('(hover: hover)').matches) return;
+  // Ignore synthetic mouseover events triggered while scrolling under a stationary cursor
+  if (performance.now() - lastKeyNavTime < 350) return;
   const el = e.target.closest(BASE_SELECTOR);
   if (el) window._navCurrent = el;
-});
+}
+
+// Singleton listener attachment — prevents duplicate listeners when nav.js
+// is loaded via script tag and also imported by app.js
+if (!window._navEventsInitialized) {
+  window._navEventsInitialized = true;
+  document.addEventListener('keydown', handleKeydown);
+  document.addEventListener('mouseover', handleMouseover);
+}
 
 export { setFocus, focusable, focusFirst, getActiveOverlay };

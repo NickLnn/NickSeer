@@ -328,9 +328,11 @@ function init() {
   });
   obs.observe(app() || document.body, { childList: true, subtree: true });
 }
+    if (isInfoActive() && !document.getElementById('infoView')) render();
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(init, 300));
 else setTimeout(init, 300);
+
 
 
 

@@ -1,5 +1,6 @@
 import { load } from '../config.js';
 import plex from './plex.js';
+import arr from './arr.js';
 import engine from '../recommend/engine.js';
 import { cached, TTL_DAY, TTL_HOUR } from '../lib/cache.js';
 
@@ -112,16 +113,17 @@ function img(path, size = 'w500') {
 }
 
 export async function getCollection(id) {
-  const [col, libMap] = await Promise.all([
+  const [col, libMap, radarrSet] = await Promise.all([
     fetchTmdbCollection(id),
-    plex.libraryMap().catch(() => ({}))
+    plex.libraryMap().catch(() => ({})),
+    arr.monitoredSet('radarr').catch(() => new Set())
   ]);
 
   if (!col) return null;
 
-  const ownedIds = new Set(Object.keys(libMap));
   const reqs = (load().requests || []).filter(r => r.status === 'pending');
   const pendingIds = new Set(reqs.map(r => String(r.tmdbId)));
+  const pendingTitles = new Set(reqs.map(r => (r.title || '').toLowerCase()).filter(Boolean));
 
   const rawParts = (col.parts || []).sort((a, b) => {
     const da = a.release_date || '9999';
@@ -130,8 +132,21 @@ export async function getCollection(id) {
   });
 
   const parts = rawParts.map(p => {
-    const inLibrary = ownedIds.has(String(p.id));
-    const isPending = pendingIds.has(String(p.id));
+    const inLibrary = Boolean(plex.isMediaInLibrary ? plex.isMediaInLibrary(libMap, {
+      id: p.id,
+      media: 'movie',
+      title: p.title,
+      originalTitle: p.original_title,
+      year: (p.release_date || '').slice(0, 4),
+      releaseDate: p.release_date
+    }) : (libMap['movie:' + p.id] || libMap[String(p.id)]));
+
+    const isPending = !inLibrary && (
+      radarrSet.has(String(p.id)) ||
+      pendingIds.has(String(p.id)) ||
+      (p.title && pendingTitles.has(p.title.toLowerCase()))
+    );
+
     return {
       id: p.id,
       media: 'movie',
@@ -152,6 +167,7 @@ export async function getCollection(id) {
   const owned = parts.filter(p => p.inLibrary).length;
   const pending = parts.filter(p => p.isPending).length;
   const missing = Math.max(0, total - owned);
+  const unrequested = Math.max(0, total - owned - pending);
 
   return {
     id: col.id,
@@ -163,6 +179,7 @@ export async function getCollection(id) {
     owned,
     missing,
     pending,
+    unrequested,
     completionPercent: total > 0 ? Math.round((owned / total) * 100) : 0,
     parts
   };
@@ -172,14 +189,15 @@ async function buildAllCollections(userId) {
   const { apiKey } = tmdbBase();
   if (!apiKey) return { incomplete: [], popular: [], completed: [], all: [] };
 
-  const [libMap, userAffinity] = await Promise.all([
+  const [libMap, userAffinity, radarrSet] = await Promise.all([
     plex.libraryMap().catch(() => ({})),
-    engine.getUserGenreAffinity(userId).catch(() => new Map())
+    engine.getUserGenreAffinity(userId).catch(() => new Map()),
+    arr.monitoredSet('radarr').catch(() => new Set())
   ]);
 
-  const ownedIds = new Set(Object.keys(libMap));
   const reqs = (load().requests || []).filter(r => r.status === 'pending');
   const pendingIds = new Set(reqs.map(r => String(r.tmdbId)));
+  const pendingTitles = new Set(reqs.map(r => (r.title || '').toLowerCase()).filter(Boolean));
   const weekSeed = getWeekSeed();
 
   const collections = [];
@@ -199,6 +217,21 @@ async function buildAllCollections(userId) {
       const parts = rawParts.map(p => {
         (p.genre_ids || []).forEach(g => genreSet.add(g));
         if (p.vote_average) { totalRating += p.vote_average; ratedCount++; }
+        const inLibrary = Boolean(plex.isMediaInLibrary ? plex.isMediaInLibrary(libMap, {
+          id: p.id,
+          media: 'movie',
+          title: p.title,
+          originalTitle: p.original_title,
+          year: (p.release_date || '').slice(0, 4),
+          releaseDate: p.release_date
+        }) : (libMap['movie:' + p.id] || libMap[String(p.id)]));
+
+        const isPending = !inLibrary && (
+          radarrSet.has(String(p.id)) ||
+          pendingIds.has(String(p.id)) ||
+          (p.title && pendingTitles.has(p.title.toLowerCase()))
+        );
+
         return {
           id: p.id,
           media: 'movie',
@@ -209,8 +242,8 @@ async function buildAllCollections(userId) {
           poster: img(p.poster_path, 'w500'),
           backdrop: img(p.backdrop_path, 'w1280'),
           rating: p.vote_average ? Math.round(p.vote_average * 10) / 10 : null,
-          inLibrary: ownedIds.has(String(p.id)),
-          isPending: pendingIds.has(String(p.id))
+          inLibrary,
+          isPending
         };
       });
 
@@ -218,6 +251,7 @@ async function buildAllCollections(userId) {
       const owned = parts.filter(p => p.inLibrary).length;
       const pending = parts.filter(p => p.isPending).length;
       const missing = Math.max(0, total - owned);
+      const unrequested = Math.max(0, total - owned - pending);
 
       // Compute personalized taste score + weekly rotation jitter
       let tasteScore = 0;
@@ -238,6 +272,7 @@ async function buildAllCollections(userId) {
         owned,
         missing,
         pending,
+        unrequested,
         completionPercent: total > 0 ? Math.round((owned / total) * 100) : 0,
         rankScore,
         parts

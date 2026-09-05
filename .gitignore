@@ -49,3 +49,4 @@ GEMINI.md
 .vs/
 *.sqlite
 _backup_*.js
+*.cs

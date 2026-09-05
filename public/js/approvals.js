@@ -1,4 +1,5 @@
-import { escHTML } from './util.js';
+import { escHTML, hasCache, authToken } from './util.js';
+import { openDetail } from './app.js';
 // approvals.js — "Approvals" tab (Seerr-style).
 // Dedicated sub-tabs: [ ⏳ Pending (X) ] and [ ✓ Approved (Y) ] + [ ✕ Declined ] & [ All ].
 // Admins see full details (quality profile, root folder, tags), and an inline Edit panel.
@@ -11,6 +12,8 @@ async function api(path, opts = {}) { try { const r = await fetch(path, { header
 let optionsCache = {};
 let currentFilter = 'pending'; // Default to pending so admin sees what needs action first
 let pollTimer = null;
+let isRendering = false;
+let lastDataSig = '';
 
 function injectStyles() {
   if (document.getElementById('appr-styles')) return;
@@ -99,120 +102,30 @@ function renderMeta(r, kind) {
   return html;
 }
 
-async function render() {
-  injectStyles();
-  const root = app(); if (!root) return;
-
-  const d = await api('/api/requests');
-  const reqs = d.requests || [];
-
-  const pendingList = reqs.filter((r) => r.status === 'pending');
-  const approvedList = reqs.filter((r) => r.status === 'approved');
-  const declinedList = reqs.filter((r) => r.status === 'declined');
-
-  // If currently on pending but there are no pending items and we have approved items on first load, switch to approved or keep
-  if (currentFilter === 'pending' && pendingList.length === 0 && approvedList.length > 0 && !root.querySelector('#apprSubtabs')) {
-    currentFilter = 'approved';
-  }
-
-  root.innerHTML = `
-    <div id="apprView">
-      <div class="appr-head">
-        <div class="appr-title-group">
-          <div class="appr-title">📋 Requests</div>
-          <span class="appr-count" id="apprCount">${pendingList.length} pending</span>
-        </div>
-        <div class="appr-subtabs" id="apprSubtabs">
-          <button class="appr-subtab ${currentFilter === 'pending' ? 'active' : ''}" data-filter="pending">
-            ⏳ Pending <span class="appr-subtab-badge">${pendingList.length}</span>
-          </button>
-          <button class="appr-subtab ${currentFilter === 'approved' ? 'active' : ''}" data-filter="approved">
-            ✓ Approved <span class="appr-subtab-badge">${approvedList.length}</span>
-          </button>
-          <button class="appr-subtab ${currentFilter === 'declined' ? 'active' : ''}" data-filter="declined">
-            ✕ Declined <span class="appr-subtab-badge">${declinedList.length}</span>
-          </button>
-          <button class="appr-subtab ${currentFilter === 'all' ? 'active' : ''}" data-filter="all">
-            All <span class="appr-subtab-badge">${reqs.length}</span>
-          </button>
-        </div>
-      </div>
-      <div class="appr-list" id="apprList"></div>
-    </div>`;
-
-  // Wire sub-tabs
-  root.querySelectorAll('.appr-subtab').forEach((tab) => {
-    tab.addEventListener('click', () => {
-      currentFilter = tab.dataset.filter;
-      render();
-    });
-  });
-
-  const list = root.querySelector('#apprList');
-  if (d.error) { list.innerHTML = `<div class="appr-empty"><h3>${escHTML(d.error)}</h3></div>`; return; }
-
-  // Pre-fetch options for radarr/sonarr to resolve profile names
-  const hasMovies = reqs.some((r) => r.media !== 'tv' && r.media !== 'show');
-  const hasShows = reqs.some((r) => r.media === 'tv' || r.media === 'show');
-  if (hasMovies) await fetchOptions('movie');
-  if (hasShows) await fetchOptions('tv');
-
-  const filtered = currentFilter === 'all' ? reqs : reqs.filter((r) => r.status === currentFilter);
-
-  if (!filtered.length) {
-    const titles = {
-      pending: 'No pending requests',
-      approved: 'No approved requests',
-      declined: 'No declined requests',
-      all: 'No requests yet'
-    };
-    const subtitles = {
-      pending: 'All caught up! When a user submits a request, it will appear here.',
-      approved: 'Approved movies and TV shows will appear here after review.',
-      declined: 'Declined requests are tracked here.',
-      all: 'When users submit requests, you can track them here.'
-    };
-    list.innerHTML = `<div class="appr-empty"><h3>${titles[currentFilter] || 'No requests'}</h3><p>${subtitles[currentFilter] || ''}</p></div>`;
-    return;
-  }
-
-  const order = { pending: 0, approved: 1, declined: 2 };
-  filtered.sort((a, b) => (order[a.status] - order[b.status]) || (b.at - a.at));
-
-  list.innerHTML = filtered.map((r) => {
-    const kind = (r.media === 'tv' || r.media === 'show') ? 'sonarr' : 'radarr';
-    const stCls = r.status === 'pending' ? 'st-pending' : r.status === 'approved' ? 'st-approved' : 'st-declined';
-    const stTxt = r.status === 'pending' ? '⏳ Pending Review' : r.status === 'approved' ? '✓ Approved' : '✕ Declined';
-    const meta = renderMeta(r, kind);
-    const actions = (d.admin && r.status === 'pending')
-      ? `<div class="appr-actions"><button class="appr-btn appr-edit" data-editbtn="${r.id}" title="Edit settings before approving">✏️ Edit</button><button class="appr-btn appr-ok" data-approve="${r.id}">Approve</button><button class="appr-btn appr-no" data-decline="${r.id}">Decline</button></div>`
-      : `<span class="appr-status ${stCls}">${stTxt}</span>`;
-    return `<div class="appr-row" data-row="${r.id}">
-      <div class="appr-top">
-        ${r.poster ? `<img class="appr-poster" src="${r.poster}" alt="">` : `<div class="appr-poster">${r.media === 'tv' ? '📺' : '🎬'}</div>`}
-        <div class="appr-main"><div class="appr-t">${r.title || ('#' + r.tmdbId)}</div><div class="appr-sub">${r.media === 'tv' ? 'Series' : 'Movie'} · requested by <b>${r.by || 'user'}</b> · ${timeAgo(r.at)}</div>${meta}</div>
-        ${actions}
-      </div>
-      <div class="appr-edit-panel" id="edit-${r.id}"></div>
-    </div>`;
-  }).join('');
-
+function wireRowActions(list, reqs) {
   // Wire approve/decline
   list.querySelectorAll('[data-approve]').forEach((b) => b.addEventListener('click', async () => {
     b.disabled = true; b.textContent = 'Approving…';
     const r = await api(`/api/requests/${b.dataset.approve}/approve`, { method: 'POST' });
-    if (r.ok) { toast('Request approved & added to download queue', 'ok'); render(); }
+    if (r.ok) { toast('Request approved & added to download queue', 'ok'); lastDataSig = ''; render(); }
     else { b.disabled = false; b.textContent = 'Approve'; toast(r.error || 'failed'); }
   }));
   list.querySelectorAll('[data-decline]').forEach((b) => b.addEventListener('click', async () => {
     const r = await api(`/api/requests/${b.dataset.decline}/decline`, { method: 'POST' });
-    if (r.ok) { toast('Request declined', 'ok'); render(); }
+    if (r.ok) { toast('Request declined', 'ok'); lastDataSig = ''; render(); }
+  }));
+
+  // Wire detail buttons
+  list.querySelectorAll('[data-detailbtn]').forEach((b) => b.addEventListener('click', () => {
+    const r = reqs.find(x => x.id === b.dataset.detailbtn);
+    if (r) openDetail({ id: r.tmdbId, media: r.media === 'tv' || r.media === 'show' ? 'tv' : 'movie', title: r.title, poster: r.poster });
   }));
 
   // Wire edit buttons
   list.querySelectorAll('[data-editbtn]').forEach((b) => b.addEventListener('click', async () => {
     const id = b.dataset.editbtn;
     const panel = document.getElementById('edit-' + id);
+    if (!panel) return;
     if (panel.classList.contains('open')) { panel.classList.remove('open'); return; }
     const rq = reqs.find((r) => r.id === id);
     if (!rq) return;
@@ -243,14 +156,163 @@ async function render() {
       const saveBtn = panel.querySelector('#editSave-' + id);
       saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
       const r = await api(`/api/requests/${id}`, { method: 'PATCH', body: JSON.stringify({ qualityProfileId: newProfile, rootFolder: newRoot, tags: newTagIds }) });
-      if (r.ok) { toast('Settings updated', 'ok'); render(); }
+      if (r.ok) { toast('Settings updated', 'ok'); lastDataSig = ''; render(); }
       else { saveBtn.disabled = false; saveBtn.textContent = '✔ Save Changes'; toast(r.error || 'Save failed'); }
     });
   }));
 }
 
+async function render(isSilent = false) {
+  if (isRendering) return;
+  isRendering = true;
+  try {
+    injectStyles();
+    const root = app(); if (!root) return;
+
+    // Only show loading placeholder on initial open when the view has not been rendered yet
+    const viewExists = !!document.getElementById('apprView');
+    if (!viewExists && !isSilent) {
+      root.innerHTML = '<div id="apprView"><div style="padding:60px;text-align:center;color:var(--muted)">Loading Requests...</div></div>';
+    }
+
+    const d = await api('/api/requests');
+    const reqs = d.requests || [];
+
+    // Signature check: if this is a background poll and nothing changed, do not touch the DOM!
+    const dataSig = currentFilter + '|' + JSON.stringify(reqs) + '|' + (d.admin ? '1' : '0');
+    if (isSilent && dataSig === lastDataSig && document.getElementById('apprList')) {
+      return;
+    }
+    lastDataSig = dataSig;
+
+    const pendingList = reqs.filter((r) => r.status === 'pending');
+    const approvedList = reqs.filter((r) => r.status === 'approved');
+    const declinedList = reqs.filter((r) => r.status === 'declined');
+
+    // If currently on pending but there are no pending items and we have approved items on first load, switch to approved
+    if (currentFilter === 'pending' && pendingList.length === 0 && approvedList.length > 0 && !document.getElementById('apprSubtabs')) {
+      currentFilter = 'approved';
+    }
+
+    // If the view shell doesn't exist yet, render it
+    const existingList = document.getElementById('apprList');
+    const existingSubtabs = document.getElementById('apprSubtabs');
+    if (!existingList || !existingSubtabs) {
+      root.innerHTML = `
+        <div id="apprView">
+          <div class="appr-head">
+            <div class="appr-title-group">
+              <div class="appr-title">📋 Requests</div>
+              <span class="appr-count" id="apprCount">${pendingList.length} pending</span>
+            </div>
+            <div class="appr-subtabs" id="apprSubtabs">
+              <button class="appr-subtab ${currentFilter === 'pending' ? 'active' : ''}" data-filter="pending">
+                ⏳ Pending <span class="appr-subtab-badge" id="badgePending">${pendingList.length}</span>
+              </button>
+              <button class="appr-subtab ${currentFilter === 'approved' ? 'active' : ''}" data-filter="approved">
+                ✓ Approved <span class="appr-subtab-badge" id="badgeApproved">${approvedList.length}</span>
+              </button>
+              <button class="appr-subtab ${currentFilter === 'declined' ? 'active' : ''}" data-filter="declined">
+                ✕ Declined <span class="appr-subtab-badge" id="badgeDeclined">${declinedList.length}</span>
+              </button>
+              <button class="appr-subtab ${currentFilter === 'all' ? 'active' : ''}" data-filter="all">
+                All <span class="appr-subtab-badge" id="badgeAll">${reqs.length}</span>
+              </button>
+            </div>
+          </div>
+          <div class="appr-list" id="apprList"></div>
+        </div>`;
+
+      // Wire sub-tabs
+      root.querySelectorAll('.appr-subtab').forEach((tab) => {
+        tab.addEventListener('click', () => {
+          currentFilter = tab.dataset.filter;
+          lastDataSig = '';
+          render();
+        });
+      });
+    } else {
+      // In-place updates to badge numbers and active state without touching the outer DOM
+      const countEl = document.getElementById('apprCount');
+      if (countEl) countEl.textContent = `${pendingList.length} pending`;
+      const bp = document.getElementById('badgePending');
+      if (bp) bp.textContent = pendingList.length;
+      const ba = document.getElementById('badgeApproved');
+      if (ba) ba.textContent = approvedList.length;
+      const bd = document.getElementById('badgeDeclined');
+      if (bd) bd.textContent = declinedList.length;
+      const ball = document.getElementById('badgeAll');
+      if (ball) ball.textContent = reqs.length;
+
+      document.querySelectorAll('.appr-subtab').forEach((tab) => {
+        tab.classList.toggle('active', tab.dataset.filter === currentFilter);
+      });
+    }
+
+    const list = document.getElementById('apprList');
+    if (!list) return;
+
+    if (d.error) {
+      list.innerHTML = `<div class="appr-empty"><h3>${escHTML(d.error)}</h3></div>`;
+      return;
+    }
+
+    // Pre-fetch options for radarr/sonarr to resolve profile names
+    const hasMovies = reqs.some((r) => r.media !== 'tv' && r.media !== 'show');
+    const hasShows = reqs.some((r) => r.media === 'tv' || r.media === 'show');
+    await Promise.all([
+      hasMovies ? fetchOptions('movie') : Promise.resolve(),
+      hasShows ? fetchOptions('tv') : Promise.resolve()
+    ]);
+
+    const filtered = currentFilter === 'all' ? reqs : reqs.filter((r) => r.status === currentFilter);
+
+    if (!filtered.length) {
+      const titles = {
+        pending: 'No pending requests',
+        approved: 'No approved requests',
+        declined: 'No declined requests',
+        all: 'No requests yet'
+      };
+      const subtitles = {
+        pending: 'All caught up! When a user submits a request, it will appear here.',
+        approved: 'Approved movies and TV shows will appear here after review.',
+        declined: 'Declined requests are tracked here.',
+        all: 'When users submit requests, you can track them here.'
+      };
+      list.innerHTML = `<div class="appr-empty"><h3>${titles[currentFilter] || 'No requests'}</h3><p>${subtitles[currentFilter] || ''}</p></div>`;
+      return;
+    }
+
+    const order = { pending: 0, approved: 1, declined: 2 };
+    filtered.sort((a, b) => (order[a.status] - order[b.status]) || (b.at - a.at));
+
+    list.innerHTML = filtered.map((r) => {
+      const kind = (r.media === 'tv' || r.media === 'show') ? 'sonarr' : 'radarr';
+      const stCls = r.status === 'pending' ? 'st-pending' : r.status === 'approved' ? 'st-approved' : 'st-declined';
+      const stTxt = r.status === 'pending' ? '⏳ Pending Review' : r.status === 'approved' ? '✓ Approved' : '✕ Declined';
+      const meta = renderMeta(r, kind);
+      const actions = (d.admin && r.status === 'pending')
+        ? `<div class="appr-actions"><button class="appr-btn appr-edit" data-editbtn="${r.id}" title="Edit settings before approving">✏️ Edit</button><button class="appr-btn appr-ok" data-approve="${r.id}">Approve</button><button class="appr-btn appr-no" data-decline="${r.id}">Decline</button></div>`
+        : `<span class="appr-status ${stCls}">${stTxt}</span>`;
+      return `<div class="appr-row" data-row="${r.id}">
+        <div class="appr-top">
+          ${r.poster ? `<img class="appr-poster" src="${r.poster}" alt="">` : `<div class="appr-poster">${r.media === 'tv' ? '📺' : '🎬'}</div>`}
+          <div class="appr-main"><div class="appr-t" data-detailbtn="${r.id}" style="cursor:pointer; transition:color 0.2s;" onmouseover="this.style.color='#5ec4f0'" onmouseout="this.style.color='#fff'" title="Click to view details">${r.title || ('#' + r.tmdbId)}</div><div class="appr-sub">${r.media === 'tv' ? 'Series' : 'Movie'} · requested by <b>${r.by || 'user'}</b> · ${timeAgo(r.at)}</div>${meta}</div>
+          ${actions}
+        </div>
+        <div class="appr-edit-panel" id="edit-${r.id}"></div>
+      </div>`;
+    }).join('');
+
+    wireRowActions(list, reqs);
+  } finally {
+    isRendering = false;
+  }
+}
+
 function toast(m, type) { const w = document.getElementById('toasts'); if (!w) return; const e = document.createElement('div'); e.className = 'toast ' + (type || 'bad'); e.textContent = m; w.appendChild(e); setTimeout(() => e.remove(), 3000); }
-function isActive() { const b = document.querySelector('.nav-link[data-view="requests"]'); return b && b.classList.contains('active'); }
+function isActive() { const b = document.querySelector('.nav-link[data-view="requests"], .bottom-nav-item[data-view="requests"], .drawer-item[data-view="requests"]'); return b && b.classList.contains('active'); }
 
 async function toggleTab() {
   const btn = document.querySelector('.nav-link[data-view="requests"]'); if (!btn) return;
@@ -265,16 +327,20 @@ async function toggleTab() {
 function init() {
   toggleTab();
   const btn = document.querySelector('.nav-link[data-view="requests"]');
-  if (btn) btn.addEventListener('click', () => setTimeout(render, 0));
+  if (btn) btn.addEventListener('click', () => { lastDataSig = ''; setTimeout(render, 0); });
   
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(() => {
     if (isActive() && !document.querySelector('.appr-edit-panel.open')) {
+      render(true);
+    }
+  }, 20000);
+
+  const obs = new MutationObserver(() => {
+    if (isActive() && !document.getElementById('apprView')) {
       render();
     }
-  }, 30000);
-
-  const obs = new MutationObserver(() => { if (isActive() && !document.getElementById('apprView')) render(); });
+  });
   obs.observe(app() || document.body, { childList: true, subtree: true });
 }
 
