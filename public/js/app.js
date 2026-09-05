@@ -1207,28 +1207,34 @@ export async function openDetail(item) {
     ]);
   }
 
-function countryFlag(code) {
-  if (!code || code.length !== 2) return '';
-  const c = code.toUpperCase();
-  try {
-    return String.fromCodePoint(127397 + c.charCodeAt(0), 127397 + c.charCodeAt(1));
-  } catch (e) {
-    return '';
+function resolveCountries(countries) {
+  if (!countries || !countries.length) {
+    return [{
+      iso: 'US',
+      name: 'United States',
+      flagUrl: 'https://flagcdn.com/w40/us.png',
+      flagSrcset: 'https://flagcdn.com/w80/us.png 2x'
+    }];
   }
-}
-
-function resolveCountry(countries) {
-  if (!countries || !countries.length) return { flag: '🇺🇸', name: 'United States' };
-  const c = countries[0];
-  const iso = (typeof c === 'string' ? c : c.iso_3166_1 || c.iso || 'US').toUpperCase();
-  let name = (typeof c === 'object' ? c.name : '') || '';
-  if (iso && (!name || name === 'United States of America')) {
-    try {
-      name = new Intl.DisplayNames(['en'], { type: 'region' }).of(iso) || name;
-    } catch (e) {}
-  }
-  if (name === 'United States of America') name = 'United States';
-  return { flag: countryFlag(iso) || '🇺🇸', name: name || 'United States' };
+  const rawList = Array.isArray(countries) ? countries : [countries];
+  const list = rawList.slice(0, 2);
+  return list.map(c => {
+    const iso = (typeof c === 'string' ? c : c.iso_3166_1 || c.iso || 'US').toUpperCase();
+    let name = (typeof c === 'object' ? c.name : '') || '';
+    if (iso && (!name || name === 'United States of America')) {
+      try {
+        name = new Intl.DisplayNames(['en'], { type: 'region' }).of(iso) || name;
+      } catch (e) {}
+    }
+    if (name === 'United States of America') name = 'United States';
+    const cleanIso = (iso || 'us').toLowerCase();
+    return {
+      iso,
+      name: name || iso,
+      flagUrl: `https://flagcdn.com/w40/${cleanIso}.png`,
+      flagSrcset: `https://flagcdn.com/w80/${cleanIso}.png 2x`
+    };
+  });
 }
 
 function resolveLanguage(langCode, spokenList) {
@@ -1320,11 +1326,27 @@ function renderMetadataBlock(d, media) {
   rows.push(makeRow('Original Language', langName));
 
   // 6. Production Country
-  const country = resolveCountry(d.productionCountries || d.production_countries);
-  const countryValNode = el('div', { class: 'overseerr-meta-value' }, [
-    country.flag ? el('span', { class: 'overseerr-flag-icon' }, country.flag) : null,
-    el('span', {}, country.name)
-  ]);
+  const countryList = resolveCountries(d.productionCountries || d.production_countries);
+  const countryNodes = [];
+  countryList.forEach((c, idx) => {
+    countryNodes.push(el('span', { class: 'overseerr-country-item' }, [
+      el('img', {
+        class: 'overseerr-flag-img',
+        src: c.flagUrl,
+        srcset: c.flagSrcset,
+        alt: c.name || c.iso,
+        width: '20',
+        height: '14',
+        loading: 'lazy',
+        onerror: "this.style.display='none'"
+      }),
+      el('span', { class: 'overseerr-country-name' }, c.name)
+    ]));
+    if (idx < countryList.length - 1) {
+      countryNodes.push(el('span', { class: 'overseerr-country-sep' }, ', '));
+    }
+  });
+  const countryValNode = el('div', { class: 'overseerr-meta-value overseerr-countries-val' }, countryNodes);
   rows.push(makeRow('Production Country', countryValNode));
 
   // 7. Studio

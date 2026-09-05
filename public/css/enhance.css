@@ -2571,11 +2571,40 @@ body {
   flex-shrink: 0;
 }
 
-.overseerr-flag-icon {
-  font-size: 17px;
-  line-height: 1;
+.overseerr-countries-val {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+}
+
+.overseerr-country-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   vertical-align: middle;
+}
+
+.overseerr-flag-img {
+  width: 20px;
+  height: 14px;
+  object-fit: cover;
+  border-radius: 2px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.overseerr-country-name {
+  color: #cbd5e1;
+}
+
+.overseerr-country-sep {
+  color: #64748b;
+  margin: 0 1px;
 }
 
 @media (max-width: 640px) {
