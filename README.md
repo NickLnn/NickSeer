@@ -106,12 +106,17 @@ Both machine-to-machine surfaces are **authenticated**. They used to be open to 
 could reach the host, which meant anyone on your network could mark requests available and
 trigger your Telegram/Discord notifications. Each now requires a shared secret.
 
-Both secrets are generated on first boot, printed once to the container log, and stored in
-`config/settings.json`. To see them again:
+Both secrets are generated automatically on first boot. To read them at any time, open
+**Settings → Requestrr Mock API → Integration secrets**, where NickSeer shows:
 
-```bash
-docker logs nickseer | head -40          # printed at first boot
-```
+- the **API key Requestrr must send**, including which of the two possible sources is actually
+  in effect, and
+- a **ready-to-paste webhook URL** with the token already appended, built from the host you are
+  currently using — so it is correct over LAN, a tunnel or a domain.
+
+Both have a Copy button, and either can be regenerated in place if it leaks. (They are also
+printed once to the container log at first boot and stored in `config/settings.json`, but you
+should not need either.)
 
 ### Requestrr (and any Overseerr-compatible client)
 
@@ -121,7 +126,7 @@ Point it at NickSeer and give it the API key as the **`X-Api-Key`** header:
 |---|---|
 | Hostname / IP | your NickSeer host |
 | Port | `5056` |
-| API Key | `services.overseerr.apikey` from `config/settings.json` |
+| API Key | the value shown under **Integration secrets** in Settings |
 
 > **Note the precedence.** NickSeer accepts `services.overseerr.apikey` first and falls back to
 > `api.key`. If both exist, the Overseerr one wins — using the other returns `403 Forbidden` on
@@ -132,8 +137,10 @@ Point it at NickSeer and give it the API key as the **`X-Api-Key`** header:
 In **Settings → Connect → Webhook**, set the URL with the token appended:
 
 ```
-http://<your-nickseer-host>:5056/api/v1/webhook?token=<webhook.secret>
+http://<your-nickseer-host>:5056/api/v1/webhook?token=<your webhook token>
 ```
+
+Settings shows this URL fully built — copy it rather than assembling it by hand.
 
 Method `POST`. An `X-Webhook-Token` header works too, if you prefer keeping the secret out of
 the URL.

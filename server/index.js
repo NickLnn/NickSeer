@@ -49,7 +49,8 @@ function ensureIntegrationSecrets() {
     console.log('  │ Radarr + Sonarr "On Import" webhook URL — append:');
     console.log(`  │   ?token=${fresh.webhook.secret}`);
     console.log('  │');
-    console.log('  │ Both are stored in settings.json and shown masked in the UI.');
+    console.log('  │ Both are also in Settings -> Requestrr Mock API, where they can');
+    console.log('  │ be copied and regenerated. You do not need this log again.');
     console.log('  └────────────────────────────────────────────────────────────');
     console.log('');
   }

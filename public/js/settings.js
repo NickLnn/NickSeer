@@ -179,6 +179,9 @@ function render(firstRun) {
     btn.addEventListener('click', () => testService('telegram', btn.dataset.testAlert));
   });
 
+  wireIntegrations(el);
+  loadIntegrations();
+
   wireSegs();
 
   if ((activeTab === 'radarr' || activeTab === 'sonarr') && current.services[activeTab].url) {
@@ -241,6 +244,100 @@ function testBlock(s) {
   `;
 }
 
+// Integration secrets panel.
+//
+// The /api/v1 key and the webhook token used to be printed once to the
+// container log at first boot and masked everywhere else, so a fresh install
+// had no way to read them back without opening config/settings.json on the
+// host. Filled in asynchronously by loadIntegrations() once the pane is in the
+// DOM, because the real (unmasked) values come from a separate admin endpoint.
+function integrationsBlock() {
+  const row = (id, label, hint) => `
+    <div class="set-field">
+      <label class="set-field-lbl">${label}</label>
+      <div style="display:flex;gap:8px;align-items:stretch;">
+        <input class="set-input" id="${id}" type="text" readonly value="Loading…"
+               style="flex:1;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;" />
+        <button type="button" class="test-btn" data-copy="${id}" title="Copy">Copy</button>
+      </div>
+      <div class="field-hint">${hint}</div>
+    </div>`;
+
+  return `
+    <div style="margin-top:18px;padding-top:16px;border-top:1px solid rgba(255,255,255,.08);">
+      <div class="set-field-lbl" style="margin-bottom:10px;opacity:.9;">Integration secrets</div>
+      ${row('int-effective-key', 'API key Requestrr must send',
+            'Set this as the API key in Requestrr. <span id="int-key-source"></span>')}
+      ${row('int-webhook-url', 'Radarr &amp; Sonarr webhook URL',
+            'Paste into Settings → Connect → Webhook, method POST. The Test button returns "ignored" — that is success; only real Download events change state.')}
+      <div class="test-line" style="margin-top:12px;gap:8px;">
+        <button type="button" class="test-btn" data-regen="webhook">↻ Regenerate webhook token</button>
+        <button type="button" class="test-btn" data-regen="api">↻ Regenerate API key</button>
+        <span class="test-result" id="int-regen-result"></span>
+      </div>
+      <div class="field-hint" style="margin-top:8px;">Regenerating immediately invalidates the old value — anything still configured with it will stop working until updated.</div>
+    </div>`;
+}
+
+async function loadIntegrations() {
+  const keyEl = document.getElementById('int-effective-key');
+  if (!keyEl) return; // pane not open
+  try {
+    const d = await fetch('/api/settings/integrations', { headers: authHeaders() }).then((r) => r.json());
+    keyEl.value = d.effectiveApiKey || '(none generated yet)';
+    const src = document.getElementById('int-key-source');
+    if (src) {
+      src.innerHTML = d.effectiveApiKeySource === 'services.overseerr.apikey'
+        ? 'Currently taking the value from the API Key field above.'
+        : "The field above is blank, so NickSeer's own generated key is in effect.";
+    }
+    const urlEl = document.getElementById('int-webhook-url');
+    if (urlEl) urlEl.value = d.webhookUrl || '(no webhook secret generated yet)';
+  } catch {
+    keyEl.value = 'Could not load — admin access required.';
+  }
+}
+
+function wireIntegrations(el) {
+  el.querySelectorAll('[data-copy]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const input = document.getElementById(btn.dataset.copy);
+      if (!input) return;
+      try {
+        await navigator.clipboard.writeText(input.value);
+        toast('Copied', 'ok');
+      } catch {
+        // Clipboard API needs a secure origin; on plain-HTTP LAN it throws.
+        input.select();
+        toast('Press Ctrl/Cmd+C to copy', 'ok');
+      }
+    });
+  });
+
+  el.querySelectorAll('[data-regen]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const target = btn.dataset.regen;
+      const out = document.getElementById('int-regen-result');
+      if (!confirm(`Regenerate the ${target === 'api' ? 'API key' : 'webhook token'}?
+
+Anything already configured with the current value will stop working until you update it.`)) return;
+      if (out) out.textContent = 'Working…';
+      try {
+        const r = await fetch('/api/settings/integrations/regenerate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ target })
+        }).then((x) => x.json());
+        if (r.error) throw new Error(r.error);
+        if (out) out.textContent = 'Regenerated — copy the new value.';
+        await loadIntegrations();
+      } catch (e) {
+        if (out) out.textContent = 'Failed: ' + e.message;
+      }
+    });
+  });
+}
+
 function renderTab(tab) {
   const s = current.services;
   const bo = current.boxoffice || { source: 'bom', area: '' };
@@ -298,10 +395,11 @@ case 'tautulli':
       + testBlock('tautulli');
 
         case 'overseerr':
-      return guideBox('Requestrr integration uses a Mock Overseerr API to seamlessly process Discord or Telegram requests.', [
+      return guideBox('Requestrr integration uses a Mock Overseerr API to seamlessly process Discord or Telegram requests. Both this API and the Radarr/Sonarr webhook are authenticated — copy the values below into those tools.', [
         { label: 'Requestrr GitHub', url: 'https://github.com/darkalfx/requestrr' }
       ])
-      + field('API Key', 'services.overseerr.apikey', s.overseerr?.apikey || '', { ph: 'nickseer-requestrr-key', hint: 'The API key Requestrr must provide.' });
+      + field('API Key', 'services.overseerr.apikey', s.overseerr?.apikey || '', { ph: 'leave blank to use the generated key below', hint: 'Sent by Requestrr as the X-Api-Key header. Leave blank and NickSeer uses its own generated key instead.' })
+      + integrationsBlock();
     case 'radarr':
       return guideBox('Radarr manages movie requests, downloading, quality profiles, and root storage folders.')
       + field('Radarr URL', 'services.radarr.url', s.radarr.url, { ph: 'http://192.168.1.100:7878' })

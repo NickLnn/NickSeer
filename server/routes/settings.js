@@ -2,6 +2,7 @@
 // the Settings page where the user enters THEIR keys. Also exposes a refresh
 // endpoint to clear all caches on demand.
 import express from '../mini.js';
+import crypto from 'crypto';
 import { load, update, redacted } from '../config.js';
 import tmdb from '../services/tmdb.js';
 import omdb from '../services/omdb.js';
@@ -29,6 +30,48 @@ router.post('/', (req, res) => {
   // the full cold fan-out. Rate limited inside triggerWarm().
   triggerWarm('settings-saved');
   res.json({ ok: true, configured: saved.configured });
+});
+
+// ---------------------------------------------------------------------------
+// Integration secrets
+// ---------------------------------------------------------------------------
+// The /api/v1 surface and the Radarr/Sonarr webhook are both authenticated, but
+// their secrets were only ever printed once to the container log at first boot
+// and then masked by redacted(). A fresh install therefore had no way to read
+// them back short of opening config/settings.json on the host — so these
+// endpoints hand them to the Settings UI.
+//
+// No extra auth needed here: index.js already rejects any /api/settings path
+// from a non-admin with 403.
+router.get('/integrations', (req, res) => {
+  const c = load();
+  // The webhook URL is built from the Host the admin is already using, so it is
+  // correct whether they reached NickSeer over LAN, a tunnel or a domain.
+  const proto = (req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || 'http';
+  const host = req.headers.host || '';
+  const secret = c.webhook?.secret || '';
+  res.json({
+    apiKey: c.api?.key || '',
+    overseerrApiKey: c.services?.overseerr?.apikey || '',
+    // Which key /api/v1 actually accepts. overseerr.apikey wins when set, and
+    // sending the other one 403s every route — worth stating outright.
+    effectiveApiKey: c.services?.overseerr?.apikey || c.api?.key || '',
+    effectiveApiKeySource: c.services?.overseerr?.apikey ? 'services.overseerr.apikey' : 'api.key',
+    webhookSecret: secret,
+    webhookUrl: host && secret ? `${proto}://${host}/api/v1/webhook?token=${secret}` : ''
+  });
+});
+
+// Rotate a secret. Anything already configured with the old value stops working
+// immediately, which is the point — it is the recovery path for a leaked token.
+router.post('/integrations/regenerate', (req, res) => {
+  const target = String(req.body?.target || '');
+  if (!['api', 'webhook'].includes(target)) {
+    return res.status(400).json({ error: "target must be 'api' or 'webhook'" });
+  }
+  const value = crypto.randomBytes(24).toString('base64url');
+  update(target === 'api' ? { api: { key: value } } : { webhook: { secret: value } });
+  res.json({ ok: true, target, value });
 });
 
 // Manual "refresh everything now" (in addition to the automatic 24h refresh).

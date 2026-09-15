@@ -65,6 +65,12 @@ const FILLER = [
 let nextId = 1000;
 const byId = new Map();
 
+// Mutable so the Settings integrations panel can be tested end to end.
+const secrets = {
+  apiKey: 'SANDBOX-api-key-0000000000',
+  webhookSecret: 'SANDBOX-webhook-secret-111'
+};
+
 function makeItem(title, year, imdb, tmdb, media = 'movie') {
   const id = nextId++;
   const it = {
@@ -194,6 +200,61 @@ function api(pathname, url, body) {
   if (pathname.startsWith('/api/discover/person/')) return { ...allItems[0], knownFor: allItems.slice(0, 20) };
   if (pathname === '/api/request/options') return { profiles: [], rootFolders: [], tags: [] };
   if (pathname === '/api/settings/users') return { users: [] };
+
+  // Settings pane fixtures. Shape mirrors config.js DEFAULTS (post-redacted()),
+  // enough for renderTab() to build every pane without throwing.
+  if (pathname === '/api/settings') {
+    return {
+      configured: true,
+      app: { name: 'NickSeer', theme: 'dark' },
+      services: {
+        plex: { url: 'http://plex.local:32400', token: '••••••••abcd' },
+        tautulli: { url: '', apikey: '' },
+        radarr: { url: '', apikey: '', qualityProfileId: null, rootFolder: '' },
+        sonarr: { url: '', apikey: '', qualityProfileId: null, rootFolder: '' },
+        sabnzbd: { url: '', apikey: '' },
+        gluetun: { url: '', apikey: '', username: '', password: '' },
+        // Deliberately blank, so the pane exercises the "falls back to the
+        // generated key" branch.
+        overseerr: { apikey: '' }
+      },
+      tmdb: { apiKey: '••••••••1234', readToken: '', region: 'GR', language: 'en-US' },
+      omdb: { apiKey: '' },
+      imdb: { movieListId: '8647021', tvListId: '' },
+      boxoffice: { source: 'bom', area: '' },
+      ai: { provider: 'none', openaiApiKey: '', openaiModel: 'gpt-4o-mini', ollamaUrl: '', ollamaModel: 'llama3.1', ollamaEmbedModel: 'nomic-embed-text' },
+      recommendation: { level: 1, historyDepth: 300, dedupeSeries: true },
+      cache: { ttlHours: 24 },
+      auth: { enabled: false, secret: '', users: [], approvals: false },
+      plexAuth: { enabled: false, clientId: '' },
+      api: { key: '••••••••wxyz' },
+      webhook: { secret: '••••••••6789' },
+      users: [],
+      telegram: { enabled: false, botToken: '', chatId: '', sendSilently: false, systemTempThreshold: 90, types: {} },
+      discord: { enabled: false, webhookUrl: '', botUsername: 'NickSeer Bot', types: {} }
+    };
+  }
+
+  // Stateful, so regenerating actually changes what the next GET returns and
+  // the UI's reload-after-regenerate path is genuinely exercised.
+  if (pathname === '/api/settings/integrations') {
+    return {
+      apiKey: secrets.apiKey,
+      overseerrApiKey: '',
+      effectiveApiKey: secrets.apiKey,
+      effectiveApiKeySource: 'api.key',
+      webhookSecret: secrets.webhookSecret,
+      webhookUrl: `http://127.0.0.1:${PORT}/api/v1/webhook?token=${secrets.webhookSecret}`
+    };
+  }
+
+  if (pathname === '/api/settings/integrations/regenerate') {
+    const target = body?.target;
+    if (!['api', 'webhook'].includes(target)) return { error: "target must be 'api' or 'webhook'" };
+    const value = 'SANDBOX-' + target + '-' + Math.random().toString(36).slice(2, 12);
+    if (target === 'api') secrets.apiKey = value; else secrets.webhookSecret = value;
+    return { ok: true, target, value };
+  }
 
   return { ok: true, sandbox: true, path: pathname };
 }
