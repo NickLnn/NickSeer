@@ -109,8 +109,13 @@ export async function notify(type, reqData) {
     fields: fields
   };
 
-  if (c.embedPoster !== false && reqData.poster && reqData.poster.startsWith('http')) {
-    embed.thumbnail = { url: reqData.poster };
+  let posterUrl = reqData.poster || '';
+  if (posterUrl && !posterUrl.startsWith('http')) {
+    posterUrl = `https://image.tmdb.org/t/p/w500${posterUrl.startsWith('/') ? '' : '/'}${posterUrl}`;
+  }
+
+  if (c.embedPoster !== false && posterUrl && posterUrl.startsWith('http')) {
+    embed.thumbnail = { url: posterUrl };
   }
 
   let content = '';

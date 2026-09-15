@@ -295,10 +295,12 @@ async function render(isSilent = false) {
       const actions = (d.admin && r.status === 'pending')
         ? `<div class="appr-actions"><button class="appr-btn appr-edit" data-editbtn="${r.id}" title="Edit settings before approving">✏️ Edit</button><button class="appr-btn appr-ok" data-approve="${r.id}">Approve</button><button class="appr-btn appr-no" data-decline="${r.id}">Decline</button></div>`
         : `<span class="appr-status ${stCls}">${stTxt}</span>`;
+      const posterSrc = r.poster ? (r.poster.startsWith('http') ? r.poster : `https://image.tmdb.org/t/p/w500${r.poster.startsWith('/') ? '' : '/'}${r.poster}`) : '';
+      const fallbackIcon = (r.media === 'tv' || r.media === 'show') ? '📺' : '🎬';
       return `<div class="appr-row" data-row="${r.id}">
         <div class="appr-top">
-          ${r.poster ? `<img class="appr-poster" src="${r.poster}" alt="">` : `<div class="appr-poster">${r.media === 'tv' ? '📺' : '🎬'}</div>`}
-          <div class="appr-main"><div class="appr-t" data-detailbtn="${r.id}" style="cursor:pointer; transition:color 0.2s;" onmouseover="this.style.color='#5ec4f0'" onmouseout="this.style.color='#fff'" title="Click to view details">${r.title || ('#' + r.tmdbId)}</div><div class="appr-sub">${r.media === 'tv' ? 'Series' : 'Movie'} · requested by <b>${r.by || 'user'}</b> · ${timeAgo(r.at)}</div>${meta}</div>
+          ${posterSrc ? `<img class="appr-poster" src="${escHTML(posterSrc)}" alt="" onerror="this.onerror=null;this.replaceWith(document.createRange().createContextualFragment('<div class=\\'appr-poster\\'>${fallbackIcon}</div>'));">` : `<div class="appr-poster">${fallbackIcon}</div>`}
+          <div class="appr-main"><div class="appr-t" data-detailbtn="${r.id}" style="cursor:pointer; transition:color 0.2s;" onmouseover="this.style.color='#5ec4f0'" onmouseout="this.style.color='#fff'" title="Click to view details">${r.title || ('#' + r.tmdbId)}</div><div class="appr-sub">${r.media === 'tv' || r.media === 'show' ? 'Series' : 'Movie'} · requested by <b>${r.by || 'user'}</b> · ${timeAgo(r.at)}</div>${meta}</div>
           ${actions}
         </div>
         <div class="appr-edit-panel" id="edit-${r.id}"></div>

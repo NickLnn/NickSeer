@@ -14,7 +14,8 @@ async function call(kind, pathname, { method = 'GET', body, custom } = {}) {
   const { base, key } = cfg(kind, custom);
   const res = await fetch(`${base}/api/v3${pathname}`, {
     method, headers: { 'X-Api-Key': key, 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(10000)
   });
   if (!res.ok) throw new Error(`${kind} ${res.status}: ${await res.text()}`);
   const text = await res.text();
@@ -96,7 +97,19 @@ export function invalidateCatalog(kind) {
 
 export function lookup(kind, tmdbId, extra = {}) {
   if (kind === 'radarr') return call('radarr', `/movie/lookup/tmdb?tmdbId=${tmdbId}`);
-  const term = tmdbId ? `tmdb:${tmdbId}` : extra.tvdbId ? `tvdb:${extra.tvdbId}` : null;
+  let term = null;
+  if (tmdbId) {
+    const str = String(tmdbId).trim();
+    if (str.startsWith('tvdb:') || str.startsWith('tmdb:') || str.startsWith('imdb:')) {
+      term = str;
+    } else {
+      term = `tmdb:${str}`;
+    }
+  } else if (extra.tvdbId) {
+    term = `tvdb:${extra.tvdbId}`;
+  } else if (extra.term || extra.title) {
+    term = extra.term || extra.title;
+  }
   if (!term) throw new Error('Series lookup needs tmdbId or tvdbId');
   return call('sonarr', `/series/lookup?term=${encodeURIComponent(term)}`);
 }

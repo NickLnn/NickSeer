@@ -17,6 +17,9 @@ A modern, self-hosted discovery hub and request manager for **Plex** & **Jellyfi
 - **Installable PWA (iOS & Android):** Add to Home Screen to run NickSeer as a full-screen native standalone app with zero browser URL bar or browser chrome.
 - **Sleek Minimalist Navigation:** Modern vector SVG bottom navigation bar with Apple TV / Netflix styling.
 - **Overseerr-Style Season Selector:** Interactive season request table with individual episode counts, master toggles, and smooth bottom-sheet modals.
+- **Swipe-to-Dismiss Sheets:** Detail, person and request sheets can be dragged down to close, with the backdrop fading as you drag.
+- **Tuned for real phones:** posters are requested at the size they are actually drawn, long rails are capped on small screens, and rating badges are painted only for cards near the viewport — together these cut decoded image memory on the Movies/TV tabs by roughly 75% and keep scrolling at a steady frame rate.
+- **Consistent Press Feedback:** a single motion system across every button, chip and nav item — 48px minimum touch targets, one spring curve, and a full `prefers-reduced-motion` fallback.
 - **Cloudflare Tunnel Hardened:** Real client IP extraction (`CF-Connecting-IP`), brute-force login rate limiting, security headers, and 24-hour CDN edge caching for static assets.
 
 ### 🤖 3. AI Taste Curation (Local LLM & OpenAI)
@@ -41,6 +44,7 @@ A modern, self-hosted discovery hub and request manager for **Plex** & **Jellyfi
 - **Full `/api/v1` Emulation:** Built-in drop-in Overseerr API compatibility layer allowing tools like **Requestrr** to interact directly with NickSeer.
 - **Requester Attribution:** Maps external user IDs (`X-API-User`) directly to corresponding local NickSeer user accounts.
 - **Radarr & Sonarr Webhooks:** Ingests media import/download webhooks at `/api/v1/webhook` to automatically mark items as `Available` in real time.
+- **Authenticated by default:** both surfaces require a shared secret — see [Connecting Requestrr, Radarr & Sonarr](#-connecting-requestrr-radarr--sonarr).
 
 ### 📊 8. Overseerr Movie & Series Metadata Hub
 - **Rich Technical & Financial Data:** Embedded metadata block directly in the details modal showcasing TMDB Status, Formatted Release Date (with ticket icon), Worldwide Revenue, Production Budget, Original Language, Production Country with flag emoji, and Studio name.
@@ -93,6 +97,79 @@ docker compose up -d
    - **Plex Server URL & Token**
    - *(Optional)* **Radarr**, **Sonarr**, **Tautulli**, **SABnzbd**, **Gluetun**, and **Ollama**.
 3. Create your Administrator account or enable **"Sign in with Plex"**.
+
+---
+
+## 🔌 Connecting Requestrr, Radarr & Sonarr
+
+Both machine-to-machine surfaces are **authenticated**. They used to be open to anything that
+could reach the host, which meant anyone on your network could mark requests available and
+trigger your Telegram/Discord notifications. Each now requires a shared secret.
+
+Both secrets are generated on first boot, printed once to the container log, and stored in
+`config/settings.json`. To see them again:
+
+```bash
+docker logs nickseer | head -40          # printed at first boot
+```
+
+### Requestrr (and any Overseerr-compatible client)
+
+Point it at NickSeer and give it the API key as the **`X-Api-Key`** header:
+
+| Setting | Value |
+|---|---|
+| Hostname / IP | your NickSeer host |
+| Port | `5056` |
+| API Key | `services.overseerr.apikey` from `config/settings.json` |
+
+> **Note the precedence.** NickSeer accepts `services.overseerr.apikey` first and falls back to
+> `api.key`. If both exist, the Overseerr one wins — using the other returns `403 Forbidden` on
+> every route.
+
+### Radarr & Sonarr webhooks
+
+In **Settings → Connect → Webhook**, set the URL with the token appended:
+
+```
+http://<your-nickseer-host>:5056/api/v1/webhook?token=<webhook.secret>
+```
+
+Method `POST`. An `X-Webhook-Token` header works too, if you prefer keeping the secret out of
+the URL.
+
+Recommended triggers: **On Grab**, **On File Import**, **On File Upgrade**. The **Test** button
+returns `{"ok":true,"status":"ignored"}` — that is success; only real `Download` events change
+state.
+
+<details>
+<summary>Diagnosing a connection that will not authenticate</summary>
+
+Set `REQUESTRR_DEBUG=1` in the container environment and restart. Every `/api/v1` call is then
+appended to `requestrr_debug.log` with its method, URL and body, so you can see exactly what
+the client sends — or confirm that nothing arrives at all. Turn it off afterwards: it is an
+unbounded file and records request bodies in plaintext.
+
+</details>
+
+---
+
+## 🧪 Development
+
+```bash
+npm test                          # offline, dependency-free unit suite
+node test/sandbox/server.mjs 5099 # UI sandbox at http://127.0.0.1:5099
+```
+
+The **sandbox** serves the real `public/` directory against a fixture API so front-end changes
+can be exercised in a browser without touching a live install. It deliberately does *not* boot
+`server/index.js` — that starts hardware monitoring and can dispatch real Telegram/Discord
+alerts. It reads no config, opens no connection to Plex/Radarr/Sonarr, and generates its
+posters locally, so it needs no network and no API keys.
+
+Fixtures are shaped to surface the bugs that are hard to eyeball: several hundred cards,
+deliberate same-title collisions (Dune 1984/2021, IT 1990/2017) carrying different ratings, and
+a share of entries with no IMDb rating.
 
 ---
 

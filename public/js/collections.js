@@ -37,6 +37,27 @@ function toast(msg, type = 'ok') {
 let collectionsCache = null;
 let lastColFetch = 0;
 
+export function formatRevenue(n) {
+  if (n == null || isNaN(n) || n <= 0) return '';
+  if (n >= 1e9) {
+    const b = n / 1e9;
+    return '$' + (b >= 10 ? b.toFixed(1) : b.toFixed(2)) + 'B';
+  }
+  if (n >= 1e6) {
+    const m = n / 1e6;
+    return '$' + (m >= 10 ? m.toFixed(1) : m.toFixed(2)) + 'M';
+  }
+  if (n >= 1e3) {
+    return '$' + Math.round(n).toLocaleString('en-US');
+  }
+  return '$' + n;
+}
+
+export function formatFullCurrency(n) {
+  if (n == null || isNaN(n) || n <= 0) return '';
+  return '$' + Math.round(n).toLocaleString('en-US');
+}
+
 function createCollectionCard(col) {
   const card = document.createElement('div');
   card.className = 'collection-card';
@@ -95,7 +116,7 @@ function createCollectionCard(col) {
     </div>
     <div class="col-info">
       <div class="col-title" title="${col.name}">${col.name}</div>
-      <div class="col-meta">${total} Parts · ${statusText}</div>
+      <div class="col-meta">${total} Parts · ${statusText}${col.formattedRevenue ? ` · <span style="color:#7ef0b0;font-weight:700;">${col.formattedRevenue}</span>` : ''}</div>
     </div>
   `;
 
@@ -322,6 +343,25 @@ export async function openCollectionModal(collectionId) {
   const isComplete = total > 0 && owned === total;
   const pct = total > 0 ? Math.round((owned / total) * 100) : (col.completionPercent || 0);
 
+  const revTotal = typeof col.totalRevenue === 'number' && col.totalRevenue > 0
+    ? col.totalRevenue
+    : parts.reduce((acc, p) => acc + (Number(p.revenue) || 0), 0);
+  const formattedRev = col.formattedRevenue || formatRevenue(revTotal);
+  const fullRev = col.fullRevenue || formatFullCurrency(revTotal);
+
+  const revenuePillHtml = revTotal > 0 ? `
+    <div class="col-revenue-pill" title="Worldwide Box Office: ${fullRev || formattedRev}">
+      <span class="col-rev-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="2" x2="12" y2="22"></line>
+          <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+        </svg>
+      </span>
+      <span class="col-rev-label">Box Office</span>
+      <span class="col-rev-val">${formattedRev}</span>
+    </div>
+  ` : '';
+
   const partsHtml = parts.map(p => {
     let statusPill = '';
     if (p.inLibrary) {
@@ -340,7 +380,7 @@ export async function openCollectionModal(collectionId) {
         </div>
         <div class="col-part-info">
           <div class="col-part-title" title="${p.title}">${p.title}</div>
-          <div class="col-part-year">${p.year || 'TBA'}</div>
+          <div class="col-part-year">${p.year || 'TBA'}${p.formattedRevenue ? ` · <span class="col-part-rev">${p.formattedRevenue}</span>` : ''}</div>
           <div class="col-part-action">${statusPill}</div>
         </div>
       </div>
@@ -375,6 +415,7 @@ export async function openCollectionModal(collectionId) {
                 ⏳ All Remaining Movies Already Requested
               </div>
             `}
+            ${revenuePillHtml}
           </div>
         </div>
       </div>

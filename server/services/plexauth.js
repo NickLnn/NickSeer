@@ -28,7 +28,7 @@ function headers() {
 
 // Step 1 — create a strong PIN.
 export async function createPin() {
-  const res = await fetch(`${PLEX_API}/pins?strong=true`, { method: 'POST', headers: headers() });
+  const res = await fetch(`${PLEX_API}/pins?strong=true`, { method: 'POST', headers: headers(), signal: AbortSignal.timeout(8000) });
   if (!res.ok) throw new Error(`plex pins ${res.status}`);
   const data = await res.json();
   return { id: data.id, code: data.code, clientId: clientId(), product: PRODUCT };
@@ -37,7 +37,7 @@ export async function createPin() {
 // Step 2 — poll a PIN; returns authToken once claimed (else null).
 export async function checkPin(id) {
   const url = new URL(`${PLEX_API}/pins/${id}`);
-  const res = await fetch(url, { headers: headers() });
+  const res = await fetch(url, { headers: headers(), signal: AbortSignal.timeout(8000) });
   if (!res.ok) throw new Error(`plex pin ${res.status}`);
   const data = await res.json();
   return data.authToken || null;
@@ -45,7 +45,7 @@ export async function checkPin(id) {
 
 // Step 3 — resolve the Plex account for a token.
 export async function accountFor(token) {
-  const res = await fetch(`${PLEX_API}/user`, { headers: { ...headers(), 'X-Plex-Token': token } });
+  const res = await fetch(`${PLEX_API}/user`, { headers: { ...headers(), 'X-Plex-Token': token }, signal: AbortSignal.timeout(8000) });
   if (!res.ok) throw new Error(`plex user ${res.status}`);
   const u = await res.json();
   return {

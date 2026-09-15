@@ -10,7 +10,10 @@ import plex from '../services/plex.js';
 import tautulli from '../services/tautulli.js';
 import sabnzbd from '../services/sabnzbd.js';
 import gluetun from '../services/gluetun.js';
+import * as telegram from '../services/telegram.js';
+import * as discord from '../services/discord.js';
 import { clear as clearCache } from '../lib/cache.js';
+import { triggerWarm } from '../lib/warm.js';
 
 const router = express.Router();
 
@@ -22,15 +25,21 @@ router.post('/', (req, res) => {
   incoming.configured = true;
   const saved = update(incoming);
   clearCache(); // settings changed → rebuild everything fresh
+  // ...and actually rebuild it, rather than leaving the next visitor to pay
+  // the full cold fan-out. Rate limited inside triggerWarm().
+  triggerWarm('settings-saved');
   res.json({ ok: true, configured: saved.configured });
 });
 
 // Manual "refresh everything now" (in addition to the automatic 24h refresh).
-router.post('/refresh', (req, res) => { clearCache(); res.json({ ok: true }); });
+router.post('/refresh', (req, res) => { clearCache(); triggerWarm('manual-refresh'); res.json({ ok: true }); });
 
 router.post('/test/:service', async (req, res) => {
   const svc = req.params.service;
-  const body = stripMasked(req.body || {});
+  // alertType is a transient flag for the Telegram alert-preview buttons, not
+  // a setting. Keep it out of the payload we persist.
+  const { alertType, ...rest } = req.body || {};
+  const body = stripMasked(rest);
   if (Object.keys(body).length) update(body);
   try {
     let result;
@@ -43,6 +52,10 @@ router.post('/test/:service', async (req, res) => {
       case 'sonarr':   result = await arr.test('sonarr'); break;
       case 'sabnzbd':  result = await sabnzbd.test(); break;
       case 'gluetun':  result = await gluetun.test(); break;
+      case 'telegram': result = await telegram.test(alertType || null); break;
+      // discord.test() resolves to { success: true } with no message; supply one
+      // here rather than editing discord.js.
+      case 'discord':  result = { ...(await discord.test()), message: 'Test notification sent to Discord' }; break;
       default: return res.status(400).json({ ok: false, error: 'unknown service' });
     }
     res.json({ ok: true, ...result });

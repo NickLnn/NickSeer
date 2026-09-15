@@ -1,40 +1,9 @@
-// Intelligent IMDb Prefetcher
-window.imdbCache = window.imdbCache || {};
-const imdbPrefetchQueue = new Map();
-let imdbPrefetchTimer = null;
-
-window.imdbObserver = new IntersectionObserver((entries) => {
-  let needsFetch = false;
-  entries.forEach(entry => {
-    if (entry.isIntersecting) {
-      const el = entry.target;
-      const id = el.dataset.id;
-      const media = el.dataset.media;
-      if (id && media && !window.imdbCache[id]) {
-        imdbPrefetchQueue.set(id, { id, media });
-        needsFetch = true;
-        window.imdbObserver.unobserve(el);
-      }
-    }
-  });
-
-  if (needsFetch && !imdbPrefetchTimer) {
-    imdbPrefetchTimer = setTimeout(() => {
-      const items = Array.from(imdbPrefetchQueue.values());
-      imdbPrefetchQueue.clear();
-      imdbPrefetchTimer = null;
-      if (!items.length) return;
-      
-      fetch('/api/discover/imdb-ratings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: items.slice(0, 30) })
-      }).then(r => r.json()).then(r => {
-        if (r && r.ratings) Object.assign(window.imdbCache, r.ratings);
-      }).catch(()=>{});
-    }, 1500);
-  }
-}, { rootMargin: '250px' });
+// IMDb rating prefetch/paint lives entirely in imdb-badge.js, which assigns
+// `window.imdbObserver`. There used to be a second IntersectionObserver here
+// that POSTed /api/discover/imdb-ratings for every card into `window.imdbCache`
+// — a global nothing in the codebase ever read. That doubled the rating
+// requests on every scroll and parsed the throwaway JSON on the main thread.
+// The `window.imdbObserver.observe(card)` calls below now reach the real one.
 
 // Universal Media Status Prefetcher (In Library & Requested)
 window.mediaStatusCache = window.mediaStatusCache || {};
@@ -114,7 +83,11 @@ window.statusObserver = new IntersectionObserver((entries) => {
 
 document.addEventListener('click', (e) => {
   if (e.target.closest('button, .card, .nav-link, .bottom-nav-item, .drawer-item, .tag-chip, .appr-subtab, .appr-btn, .icon-btn')) {
-    if (navigator.vibrate) navigator.vibrate(40);
+    // 40ms reads as a buzz rather than a UI tick — native controls land around
+    // 10-15ms. Taps that `bindCardActivate` rejects as scroll gestures call
+    // stopPropagation(), so they no longer reach this listener and no longer
+    // produce a phantom haptic while flinging a rail.
+    if (navigator.vibrate) navigator.vibrate(12);
   }
 });
 // NickSeer main app — login, multi-user profiles, brand-logo row titles,
@@ -134,6 +107,10 @@ document.addEventListener('click', (e) => {
 import { toast, el, api, stars, authToken , escHTML, hasCache } from './util.js';
 import { openSettings } from './settings.js';
 import { setFocus } from './nav.js';
+// Overlay lifecycle lives in its own module — see the note in overlay.js for
+// why it must not be imported from app.js.
+import { closeAllOverlays, applyScrollLock, releaseScrollLock, anyOverlayOpen, enableSheetDrag, clearSheetDrag } from './overlay.js';
+export { closeAllOverlays, applyScrollLock, releaseScrollLock, anyOverlayOpen };
 const app = document.getElementById('app');
 const ambient = document.getElementById('ambient');
 let currentView = 'home';
@@ -161,6 +138,63 @@ try {
   extObserver.observe(document.body, { childList: true });
 } catch (_) {}
 
+// Poster <img> with a load state that cannot strand the image invisible.
+// The old inline version defaulted to opacity:0 in CSS and only revealed on
+// `onload` — so a cached image (load fired before the listener attached) or a
+// decode error left a blank card over correctly-reserved space.
+// ---------------------------------------------------------------------------
+// TMDB image sizing.
+//
+// Every poster URL the API hands back is `w500`, and a w500 poster decodes to
+// 500 x 750 x 4 = ~1.5MB of RGBA held in memory for as long as the <img> lives.
+// The Movies and TV tabs render an "IMDb Top 250" rail — 250 cards in ONE
+// horizontal row, 37,020px wide — so flicking through it loads and RETAINS
+// every one of them.
+//
+// Measured on the live server after scrolling that rail to the end:
+//   270 posters loaded, all naturalWidth 500  ->  386 MB of decoded image RAM
+//
+// A phone tab's budget is a fraction of that, so the browser starts evicting
+// and re-decoding continuously (which reads as "laggy, I can't scroll up or
+// swipe the posters") or drops the tab entirely. Reported by Nick 2026-09-16.
+//
+// Cards are 136-168px wide, so w342 is still 2.0-2.5x on a phone — visually
+// indistinguishable at that size — and cuts the per-poster cost to
+// 342 x 513 x 4 = ~0.70MB, a 53% reduction.
+//
+// Applied HERE rather than at the dozen server-side URL builders on purpose:
+// this is the single point every card poster passes through, so hero
+// backdrops, modal artwork and the posters attached to Discord/Telegram
+// notifications are all left at full size.
+const CARD_POSTER_SIZE = 'w342';
+// 0 disables the cap. Evaluated once: the layout does not reflow rails on
+// rotation, so re-reading it per row would only risk a mixed-length page.
+const MOBILE_RAIL_CAP = (() => {
+  try { return matchMedia('(max-width: 768px)').matches ? 100 : 0; } catch { return 0; }
+})();
+const HERO_BACKDROP_SIZE_MOBILE = 'w780';
+
+function tmdbSized(url, size) {
+  if (!url || typeof url !== 'string') return url;
+  return url.replace(/\/t\/p\/(w\d+|original)\//, `/t/p/${size}/`);
+}
+window.tmdbSized = tmdbSized;
+
+function posterImg(src, title) {
+  const img = el('img', {
+    class: 'card-poster is-loading',
+    src: tmdbSized(src, CARD_POSTER_SIZE),
+    loading: 'lazy',
+    decoding: 'async',
+    alt: title || '',
+    onload: (e) => e.target.classList.remove('is-loading'),
+    onerror: (e) => e.target.classList.remove('is-loading')
+  });
+  // Covers the already-complete case the event can never report.
+  if (img.complete && img.naturalWidth > 0) img.classList.remove('is-loading');
+  return img;
+}
+
 // ---------- brand logos ----------
 const BRANDS = {
   netflix: { cls: 'bg-netflix', mark: 'N' },
@@ -178,17 +212,33 @@ function brandBadge(key) {
 
 // ---------- login & auth gating ----------
 import { renderAegeanLogin, promptReauth, getMe } from './login-enhance.js';
-async function ensureAuth() {
-  try {
-    const st = await fetch('/api/auth/status').then((r) => r.json()).catch(() => ({ enabled: false }));
-    if (!st || !st.enabled) return true;
-  } catch { /* proceed */ }
+// Consolidated boot payload. Replaces the four SERIALIZED requests the app
+// used to make before it could paint anything:
+//   /api/auth/status -> /api/auth/me -> /api/health -> /api/auth/me (again,
+//   from updateRoleVisibility). Each was a full Cloudflare Tunnel round trip.
+// Cleared on login / logout / profile switch so role changes take effect.
+let bootstrapData = null;
 
-  const tok = authToken();
-  if (tok) {
-    const me = await fetch('/api/auth/me', { headers: { Authorization: 'Bearer ' + tok } }).then((r) => r.json()).catch(() => ({ ok: false }));
-    if (me && me.ok) return true;
+async function fetchBootstrap() {
+  const t = authToken();
+  try {
+    bootstrapData = await fetch('/api/public/bootstrap', {
+      headers: t ? { Authorization: 'Bearer ' + t } : {}
+    }).then((r) => r.json());
+  } catch {
+    bootstrapData = null;
   }
+  return bootstrapData;
+}
+
+export function invalidateBootstrap() { bootstrapData = null; }
+
+async function ensureAuth() {
+  const b = bootstrapData || await fetchBootstrap();
+  // Endpoint unreachable — fall through and let the individual views report.
+  if (!b) return true;
+  if (!b.auth?.enabled) return true;
+  if (b.me?.ok) return true;
   await showLogin();
   return false;
 }
@@ -202,16 +252,22 @@ function showLogin() {
     document.getElementById('settings')?.classList.add('hidden');
     renderAegeanLogin(async (user) => {
       resolve(true);
+      // The token changed, so the cached boot payload (and its isAdmin flag)
+      // is stale — force a fresh one before painting the app.
+      bootstrapData = null;
+      await fetchBootstrap();
       await afterAuth();
     });
   });
 }
 document.addEventListener('auth:required', () => {
+  bootstrapData = null;
   localStorage.removeItem('nickseer_token');
   localStorage.removeItem('nickseer_profile');
   showLogin();
 });
 document.addEventListener('auth:logout', () => {
+  bootstrapData = null;
   localStorage.removeItem('nickseer_token');
   localStorage.removeItem('nickseer_profile');
   showLogin();
@@ -276,6 +332,7 @@ async function chooseProfile(force = false) {
   let host = document.getElementById('profileOverlay');
   if (!host) { host = document.createElement('div'); host.id = 'profileOverlay'; host.className = 'profile-overlay'; document.body.appendChild(host); }
   host.classList.remove('hidden');
+  applyScrollLock('profile');
   const avatar = (u) => {
     const initials = (u.name || '?').split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
     const style = u.thumb ? `background-image:url('${u.thumb}');background-size:cover;` : '';
@@ -306,7 +363,12 @@ async function chooseProfile(force = false) {
       // "Everyone" — cosmetic only; no auth change. Requests made while this
       // is selected are attributed to whoever is actually signed in.
       setProfile({ id: '', name: 'Everyone' });
-      host.classList.add('hidden'); rowsCache = null; showView('home');
+      host.classList.add('hidden'); rowsCache = null;
+      // Token may have changed (profile switch re-authenticates) — drop the
+      // cached boot payload so role-gated nav is recomputed.
+      bootstrapData = null;
+      await updateRoleVisibility(true);
+      showView('home');
       toast('Browsing as Everyone', 'ok');
       return;
     }
@@ -314,7 +376,12 @@ async function chooseProfile(force = false) {
     if (!isAccount) {
       // Media-only profile (no NickSeer login account yet) — cosmetic switch.
       setProfile({ id, name });
-      host.classList.add('hidden'); rowsCache = null; showView('home');
+      host.classList.add('hidden'); rowsCache = null;
+      // Token may have changed (profile switch re-authenticates) — drop the
+      // cached boot payload so role-gated nav is recomputed.
+      bootstrapData = null;
+      await updateRoleVisibility(true);
+      showView('home');
       toast(`Browsing as ${name} — requests use your signed-in account`, 'ok');
       return;
     }
@@ -323,7 +390,12 @@ async function chooseProfile(force = false) {
     const me = await getMe();
     if (me && me.username.toLowerCase() === name.toLowerCase()) {
       setProfile({ id, name });
-      host.classList.add('hidden'); rowsCache = null; showView('home');
+      host.classList.add('hidden'); rowsCache = null;
+      // Token may have changed (profile switch re-authenticates) — drop the
+      // cached boot payload so role-gated nav is recomputed.
+      bootstrapData = null;
+      await updateRoleVisibility(true);
+      showView('home');
       toast(`Welcome, ${name}`, 'ok');
       return;
     }
@@ -340,7 +412,7 @@ async function chooseProfile(force = false) {
     }
   }));
   const close = host.querySelector('#profileClose');
-  if (close) close.addEventListener('click', () => host.classList.add('hidden'));
+  if (close) close.addEventListener('click', () => { host.classList.add('hidden'); releaseScrollLock('profile'); });
   setTimeout(() => { const f = host.querySelector('.profile-tile'); if (f) setFocus(f); }, 80);
   injectStyles();
 }
@@ -375,13 +447,9 @@ async function boot() {
   await afterAuth();
 }
 async function afterAuth() {
-  let health = { configured: true };
-  try {
-    const h = await api('/api/health');
-    if (h && typeof h.configured === 'boolean') health = h;
-  } catch {
-    health = { configured: true };
-  }
+  // Health now arrives inside the bootstrap payload — no extra round trip.
+  const b = bootstrapData || await fetchBootstrap();
+  const health = b?.health || { configured: true };
 
   if (health.configured === false) {
     openSettings(true);
@@ -486,16 +554,21 @@ function setupNavigation() {
   });
 }
 setupNavigation();
-export async function updateRoleVisibility() {
+export async function updateRoleVisibility(force = false) {
   const t = authToken();
   let isAdmin = false;
-  if (t) {
+  // Reuse the boot payload rather than issuing a second /api/auth/me. Pass
+  // force:true after anything that can change the caller's role.
+  if (!force && bootstrapData) {
+    isAdmin = !!bootstrapData.isAdmin;
+  } else if (t) {
     try {
       const me = await fetch('/api/auth/me', { headers: { Authorization: 'Bearer ' + t } }).then((r) => r.json());
       isAdmin = me?.user?.role === 'admin';
+      if (bootstrapData) bootstrapData.isAdmin = isAdmin;
     } catch { isAdmin = false; }
   }
-  
+
   // Admin-only navigation views
   const adminViews = ['info', 'live'];
   document.querySelectorAll('.nav-link, .drawer-item, .bottom-nav-item').forEach((el) => {
@@ -514,6 +587,9 @@ export async function updateRoleVisibility() {
 }
 async function showView(view, force = false) {
   const seq = ++currentViewSeq;
+  // Navigating away ALWAYS tears down whatever is covering the app. This is
+  // the fix for "tapping the nav bar behind an open modal does nothing".
+  closeAllOverlays();
   if (['info', 'live'].includes(view)) {
     const isAdmin = await updateRoleVisibility();
     if (seq !== currentViewSeq) return;
@@ -571,6 +647,15 @@ async function showView(view, force = false) {
     app.innerHTML = '';
     app.appendChild(emptyState('Something went wrong', e.message));
   }
+
+  // Announce the settled view. info.js and live.js used to render straight off
+  // their own nav click, which fires BEFORE showView finishes its async admin
+  // check — so a non-admin got the admin-only panel painted while showView was
+  // still on its way to bouncing them back to Home. Listening for this event
+  // means they only render once the gate has actually passed.
+  if (seq === currentViewSeq) {
+    document.dispatchEvent(new CustomEvent('view:changed', { detail: { view } }));
+  }
 }
 
 window.addEventListener('hashchange', () => {
@@ -582,55 +667,109 @@ window.addEventListener('hashchange', () => {
 });
 async function getRows(force) { if (rowsCache && !force) return rowsCache; rowsCache = await api('/api/discover/rows' + (force ? '?refresh=1' : '')); return rowsCache; }
 async function renderHome(force, seq) {
-  try {
-    const [home, curated] = await Promise.all([
-      api('/api/discover/home' + userQuery(force ? 'refresh=1' : '')).catch(() => ({ rows: [] })),
-      getRows(force).catch(() => ({ rows: [] }))
-    ]);
+  // Home pulls from two independent sources: the personalised recommendation
+  // engine (/api/discover/home) and the curated TMDB rows (/api/discover/rows).
+  // These used to be awaited together, so the slower one gated the entire
+  // paint — a cold recommendation build left the user staring at a skeleton
+  // for several seconds even though the curated rows were already cached.
+  // Now each source paints into its own slot the moment it lands.
+  const alive = () => !(seq && seq !== currentViewSeq) && currentView === 'home';
+  if (!alive()) return;
 
-    if (seq && seq !== currentViewSeq) return;
-    if (currentView !== 'home') return;
-
+  const heroHost = el('div', { id: 'homeHero' });
+  const persoHost = el('div', { id: 'homePerso' });
+  const curatedHost = el('div', { id: 'homeCurated' });
+  // The skeleton showView() painted stays up until the first source lands, so
+  // the page never flashes empty between the skeleton and real content.
+  let hostsMounted = false;
+  const mountHosts = () => {
+    if (hostsMounted) return;
+    hostsMounted = true;
     app.innerHTML = '';
-    const persoRows = home?.rows || [];
-    const curatedRows = curated?.rows || [];
-    const slideItems = (persoRows[0]?.items || curatedRows[0]?.items || []).slice(0, 7);
+    // Curated BEFORE personalised: "Trending Movies" and "Trending Series" lead
+    // the home screen, then the "Because you watched ..." rows.
+    //
+    // The client filters curated rows with `!isTop(title) && !r.brand`, which
+    // drops every provider "· Top 10" row, so buildCuratedRows() effectively
+    // contributes exactly those two trending rows here.
+    //
+    // Order is fixed by the DOM, not by which request resolves first — each
+    // source still paints into its own host the moment it lands, so a slow
+    // recommendation build cannot delay trending, and a slow TMDB call cannot
+    // push the personalised rows to the top.
+    app.append(heroHost, curatedHost, persoHost);
+  };
 
-    if (slideItems.length) {
-      app.appendChild(heroSlideshow(slideItems));
+  let heroPainted = false;
+  let painted = false;
+  // Track upstream failures so an outage is not reported as an empty library.
+  let upstreamErr = null;
+  const paintHero = (items) => {
+    if (heroPainted || !items || !items.length) return;
+    heroPainted = true;
+    heroHost.appendChild(heroSlideshow(items.slice(0, 7)));
+  };
+  // Render rows a few at a time so a long list never blocks the main thread.
+  const stagger = (host, fns, size = 3) => {
+    const chunk = (startAt) => {
+      const part = fns.slice(startAt, startAt + size);
+      if (!part.length) return;
+      for (const fn of part) host.appendChild(fn());
+      if (startAt + size < fns.length) {
+        requestAnimationFrame(() => setTimeout(() => chunk(startAt + size), 20));
+      }
+    };
+    chunk(0);
+  };
+  const firstPaint = () => {
+    if (painted) return;
+    painted = true;
+    focusFirstCard();
+  };
+
+  const homeReq = api('/api/discover/home' + userQuery(force ? 'refresh=1' : ''))
+    .catch(() => ({ rows: [] }))
+    .then((home) => {
+      if (!alive()) return null;
+      if (home?.error) upstreamErr = home.error;
+      const persoRows = (home?.rows || []).filter((r) => r && r.items && r.items.length);
+      if (persoRows.length || home?.cold) mountHosts();
+      paintHero(persoRows[0]?.items);
+      if (home?.cold && !persoRows.length) {
+        persoHost.appendChild(rowSub("No watch history yet — showing trending & charts. Watch a few things in Plex and Home becomes personal."));
+      }
+      stagger(persoHost, persoRows.map((row) => () => rowEl(row.title, row.items, row.title.startsWith('Picked'))));
+      if (persoRows.length) firstPaint();
+      return persoRows;
+    });
+
+  const curatedReq = getRows(force)
+    .catch(() => ({ rows: [] }))
+    .then((curated) => {
+      if (!alive()) return null;
+      if (curated?.error) upstreamErr = curated.error;
+      const curatedRows = (curated?.rows || []).filter((r) => r && r.items && r.items.length && !isTop(r.title) && !r.brand);
+      if (curatedRows.length) mountHosts();
+      paintHero(curatedRows[0]?.items);
+      stagger(curatedHost, curatedRows.map((row) => () => rowEl(row.title, row.items, false, false, row.brand)));
+      if (curatedRows.length) firstPaint();
+      return curatedRows;
+    });
+
+  try {
+    const [persoRows, curatedRows] = await Promise.all([homeReq, curatedReq]);
+    if (!alive()) return;
+    if (!persoRows?.length && !curatedRows?.length) {
+      hostsMounted = true;
+      app.innerHTML = '';
+      app.appendChild(upstreamErr
+        ? errorState("Couldn't load your rows", upstreamErr + " — this is usually TMDB or Plex being unreachable, not a problem with your library.", () => showView("home", true))
+        : emptyState("Nothing to show yet", "No rows came back. Check that TMDB and Plex are configured in Settings.", true));
     }
-
-    if (home?.cold && !persoRows.length) {
-      app.appendChild(rowSub("No watch history yet — showing trending & charts. Watch a few things in Plex and Home becomes personal."));
-    }
-
-          // Staggered render for rows
-      const fns = [];
-      for (const row of persoRows) {
-        if (row && row.items && row.items.length) fns.push(() => rowEl(row.title, row.items, row.title.startsWith('Picked')));
-      }
-      const nonStreamingCuratedRows = curatedRows.filter(r => !isTop(r.title) && !r.brand);
-      for (const row of nonStreamingCuratedRows) {
-        if (row && row.items && row.items.length) fns.push(() => rowEl(row.title, row.items, false, false, row.brand));
-      }
-      
-      const renderChunk = (start, count) => {
-        const chunk = fns.slice(start, start + count);
-        if (!chunk.length) return;
-        for (const fn of chunk) app.appendChild(fn());
-        if (start + count < fns.length) {
-          requestAnimationFrame(() => setTimeout(() => renderChunk(start + count, count), 20));
-        }
-      };
-      renderChunk(0, 3);
-      
-      if (!persoRows.length && !nonStreamingCuratedRows.length) {
-        app.appendChild(emptyState('Discover Media', 'Loading library rows... Tap Refresh if content does not appear.', true));
-      }
-
-      focusFirstCard();
   } catch (err) {
     console.error('[home] renderHome error:', err);
+    if (!alive() || painted) return;
+    hostsMounted = true;
     app.innerHTML = '';
     app.appendChild(emptyState('Something went wrong', err.message || 'Error loading home screen. Tap below to reload.', true));
   }
@@ -837,7 +976,7 @@ function createCollectionCardEl(col) {
     </div>
     <div class="col-info">
       <div class="col-title" title="${col.name}">${col.name}</div>
-      <div class="col-meta">${total} Parts · ${statusText}</div>
+      <div class="col-meta">${total} Parts · ${statusText}${col.formattedRevenue ? ` · <span style="color:#7ef0b0;font-weight:700;">${col.formattedRevenue}</span>` : ''}</div>
     </div>
   `;
 
@@ -930,7 +1069,7 @@ function boxOfficeCard(it, rank) {
       }
     }
     c.addEventListener('click', () => openDetail(it));
-  if (it.poster) c.appendChild(el('img', { class: 'card-poster', src: it.poster, loading: 'lazy', alt: it.title, onload: (e) => e.target.classList.add('fade-in') }));
+  if (it.poster) c.appendChild(posterImg(it.poster, it.title));
   else c.appendChild(el('div', { class: 'card-fallback' }, it.title || 'No image'));
   c.appendChild(el('div', { class: 'card-rank' }, String(rank)));
   if (it.weekend) c.appendChild(el('div', { class: 'card-badge', style: 'left:8px;right:auto;top:8px;background:rgba(53,208,127,.92);color:#03150b;font-size:12px' }, it.weekend));
@@ -1008,7 +1147,11 @@ function tabHeader(title, media, onSwitch) {
 function heroSlideshow(items) {
   stopSlideshow();
   const node = el('section', { class: 'hero' });
-  const slides = items.map((it, i) => { const sl = el('div', { class: 'hero-slide' + (i === 0 ? ' on' : '') }); if (it.backdrop) sl.style.backgroundImage = `url(${it.backdrop})`; return sl; });
+  // w1280 backdrops are ~3.7MB decoded each and there are up to 7 slides.
+  // w780 is still 2x on a 375px screen for ~1.4MB.
+  const narrow = (() => { try { return matchMedia('(max-width: 768px)').matches; } catch { return false; } })();
+  const heroSize = narrow ? HERO_BACKDROP_SIZE_MOBILE : null;
+  const slides = items.map((it, i) => { const sl = el('div', { class: 'hero-slide' + (i === 0 ? ' on' : '') }); if (it.backdrop) sl.style.backgroundImage = `url(${heroSize ? tmdbSized(it.backdrop, heroSize) : it.backdrop})`; return sl; });
   slides.forEach((s) => node.appendChild(s));
   const content = el('div', { class: 'hero-content' });
   const dots = el('div', { class: 'hero-dots' });
@@ -1018,7 +1161,14 @@ function heroSlideshow(items) {
   const paint = () => {
     const it = items[idx]; setAmbient(it.backdrop); content.innerHTML = '';
     content.appendChild(el('h1', { class: 'hero-title' }, it.title));
-    content.appendChild(el('div', { class: 'hero-meta' }, [it.year ? el('span', {}, it.year) : null, it.rating ? el('span', { style: 'color:var(--gold)' }, stars(it.rating)) : null, it.weekend ? el('span', { class: 'vpn-pill' }, it.weekend + ' weekend') : null, it.total ? el('span', { class: 'chip' }, `${it.total} ${it.totalKind === 'worldwide' ? '🌍' : ''}`) : null, el('span', { class: 'chip' }, it.media === 'tv' ? 'TV' : 'Movie')]));
+    content.appendChild(el('div', { class: 'hero-meta' }, [
+      it.year ? el('span', {}, it.year) : null,
+      it.rating ? el('span', { class: 'tmdb-star-val', style: 'color:var(--gold)' }, stars(it.rating)) : null,
+      window.renderImdbInlineBadge ? window.renderImdbInlineBadge(it.imdbRating, it.imdbUrl, it.imdbVotes, it.id, it.media || 'movie', it.title, it.year) : null,
+      it.weekend ? el('span', { class: 'vpn-pill' }, it.weekend + ' weekend') : null,
+      it.total ? el('span', { class: 'chip' }, `${it.total} ${it.totalKind === 'worldwide' ? '🌍' : ''}`) : null,
+      el('span', { class: 'chip' }, it.media === 'tv' ? 'TV' : 'Movie')
+    ]));
     if (it.overview) content.appendChild(el('p', { class: 'hero-overview' }, it.overview));
     let heroReqBtn = el('button', { class: 'btn btn-accent', 'data-nav': '', onclick: () => openRequestModal(it) }, '＋  Request');
     if (window.mediaStatusCache && window.mediaStatusCache[it.id]) {
@@ -1029,6 +1179,13 @@ function heroSlideshow(items) {
         heroReqBtn = el('button', { class: 'btn btn-requested', 'data-nav': '', disabled: true, style: 'opacity:0.8;cursor:default;background:rgba(245,197,24,.18);color:#f5c518;border:1px solid rgba(245,197,24,.4)' }, '⏳  Requested');
       }
     }
+    // Dots live IN THE FLOW between the overview and the buttons.
+    // They used to be a sibling of .hero-content pinned at `bottom: 74px`, a
+    // magic number that assumed one specific button height — so they landed on
+    // top of the gap between the description and the CTAs and the whole block
+    // read as cramped. In-flow, the spacing is deterministic however the
+    // overview wraps. `paint()` clears content, so they are re-appended here.
+    content.appendChild(dots);
     content.appendChild(el('div', { class: 'hero-actions' }, [el('button', { class: 'btn btn-primary', 'data-nav': '', onclick: () => openDetail(it) }, '▶  Trailer & Details'), heroReqBtn]));
     slides.forEach((s, i) => s.classList.toggle('on', i === idx));
     dotEls.forEach((d, i) => d.classList.toggle('on', i === idx));
@@ -1036,7 +1193,7 @@ function heroSlideshow(items) {
   const go = (i) => { idx = (i + items.length) % items.length; paint(); restart(); };
   const next = () => go(idx + 1); const prev = () => go(idx - 1);
   const restart = () => { stopSlideshow(); slideTimer = setInterval(next, 6000); };
-  node.appendChild(content); node.appendChild(dots);
+  node.appendChild(content);
   node.appendChild(el('div', { class: 'hero-arrows' }, [el('button', { class: 'hero-arrow', 'data-nav': '', title: 'Previous', onclick: prev }, '‹'), el('button', { class: 'hero-arrow', 'data-nav': '', title: 'Next', onclick: next }, '›')]));
   paint(); restart(); return node;
 }
@@ -1052,11 +1209,60 @@ function rowEl(title, items, isPicked, ranked, brand) {
   titleNode.appendChild(inner);
   wrap.appendChild(el('div', { class: 'row-head' }, [titleNode, isPicked ? el('div', { class: 'row-sub' }, 'tuned to your Plex history') : null]));
   const scroll = el('div', { class: 'row-scroll' });
-  (items || []).forEach((it, i) => scroll.appendChild(card(it, ranked ? i + 1 : null)));
-  if (!items || !items.length) scroll.appendChild(el('div', { class: 'row-sub', style: 'padding:20px' }, 'Nothing here yet.'));
-  wrap.appendChild(scroll);
+  // Cap rail length on phones.
+  //
+  // The Movies/TV tabs render "IMDb Top 250" as 250 cards in ONE row, 37,020px
+  // wide. Every poster stays resident once scrolled past, and even at the new
+  // w342 size that rail alone is ~175MB of decoded image RAM — enough to make a
+  // phone browser thrash. Nobody flicks 250 posters sideways on a phone anyway;
+  // the tail of that rail is cost with no use.
+  //
+  // Applied in rowEl() so it covers every rail, present and future. Rails that
+  // are already short (Home's are ~20) are unaffected.
+  const all = items || [];
+  const shown = (MOBILE_RAIL_CAP && all.length > MOBILE_RAIL_CAP) ? all.slice(0, MOBILE_RAIL_CAP) : all;
+  shown.forEach((it, i) => scroll.appendChild(card(it, ranked ? i + 1 : null)));
+  if (!all.length) scroll.appendChild(el('div', { class: 'row-sub', style: 'padding:20px' }, 'Nothing here yet.'));
+  // Same scroll affordance as the modal rails: arrows for mouse users, edge
+  // fade for everyone. Poster rows had neither and no visible scrollbar.
+  wrap.appendChild(railWithArrows(scroll));
   return wrap;
 }
+// Distinguishes a real tap from the tap that stops a momentum fling, and from a
+// drag that merely ends on top of a card. Without this, flicking a poster rail
+// and putting your finger down to stop it opens whatever card you landed on —
+// the "wrong movie opens" complaint. Keyboard/remote activation goes through
+// `element.click()`, which is untrusted and has `detail === 0`, so it bypasses
+// the gesture guard entirely.
+function bindCardActivate(cardEl, onActivate) {
+  let sx = 0, sy = 0, startLeft = 0, rail = null, moved = false;
+
+  cardEl.addEventListener('pointerdown', (e) => {
+    sx = e.clientX; sy = e.clientY; moved = false;
+    rail = cardEl.closest('.row-scroll, .cast-row');
+    startLeft = rail ? rail.scrollLeft : 0;
+  }, { passive: true });
+
+  cardEl.addEventListener('pointermove', (e) => {
+    if (Math.abs(e.clientX - sx) > 10 || Math.abs(e.clientY - sy) > 10) moved = true;
+  }, { passive: true });
+
+  // The browser fires pointercancel when it takes the gesture over to scroll.
+  // That is by definition a pan, never a tap, so latch it.
+  cardEl.addEventListener('pointercancel', () => { moved = true; }, { passive: true });
+
+  cardEl.addEventListener('click', (e) => {
+    if (!e.isTrusted || e.detail === 0) { onActivate(); return; }
+    // The rail is still gliding, or the finger travelled: that was a scroll.
+    if (moved || (rail && Math.abs(rail.scrollLeft - startLeft) > 4)) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    onActivate();
+  });
+}
+
 function rowSub(text) { return el('div', { class: 'row-sub', style: 'padding:0 40px 4px' }, text); }
 function card(item, rank) {
       const c = el('div', { class: 'card', tabindex: '0', 'data-nav': '' });
@@ -1071,8 +1277,8 @@ function card(item, rank) {
         window.statusObserver.observe(c);
       }
     }
-    c.addEventListener('click', () => openDetail(item));
-  if (item.poster) c.appendChild(el('img', { class: 'card-poster', src: item.poster, loading: 'lazy', alt: item.title, onload: (e) => e.target.classList.add('fade-in') }));
+    bindCardActivate(c, () => openDetail(item));
+  if (item.poster) c.appendChild(posterImg(item.poster, item.title));
   else c.appendChild(el('div', { class: 'card-fallback' }, item.title || 'No image'));
   if (item.rating) c.appendChild(el('div', { class: 'card-badge' }, stars(item.rating)));
   if (rank) c.appendChild(el('div', { class: 'card-rank' }, String(rank)));
@@ -1096,6 +1302,10 @@ export async function openDetail(item) {
   const modal = document.getElementById('modal');
   const cardEl = document.getElementById('modalCard');
   modal.classList.remove('hidden');
+  applyScrollLock();
+  // The CSS grab bar on mobile now actually does something.
+  clearSheetDrag(cardEl);
+  enableSheetDrag(cardEl, closeModal);
   cardEl.innerHTML = '<div style="padding:60px;text-align:center;color:var(--muted)">Loading…</div>';
   document.getElementById('modalBackdrop').onclick = closeModal;
   const media = item.media === 'show' ? 'tv' : item.media || 'movie';
@@ -1149,27 +1359,11 @@ export async function openDetail(item) {
   const meta = el('div', { class: 'modal-meta' }, [
     d.year ? el('span', {}, d.year) : null,
     d.runtime ? el('span', {}, d.runtime + ' min') : null,
-    d.rating ? el('span', { style: 'color:var(--gold)' }, stars(d.rating)) : null,
+    d.rating ? el('span', { class: 'tmdb-star-val', style: 'color:var(--gold)' }, stars(d.rating)) : null,
+    window.renderImdbInlineBadge ? window.renderImdbInlineBadge(d.imdbRating, d.imdbUrl, d.imdbVotes, d.id, media, d.title, d.year) : null,
     el('span', { class: 'chip' }, media_label),
     ...(d.genres || []).slice(0, 3).map((g) => el('span', { class: 'chip' }, g))
   ]);
-      if (d.imdbRating) {
-      meta.appendChild(el('span', { class: 'imdb-badge' }, [el('span', { class: 'imdb-logo' }, 'IMDb'), el('span', { class: 'imdb-score', html: `<b>${d.imdbRating.toFixed(1)}</b>/10` }), d.imdbVotes ? el('span', { class: 'imdb-votes' }, d.imdbVotes) : null]));
-    } else if (d.imdbUrl) {
-      const badge = el('span', { class: 'imdb-badge' }, [el('span', { class: 'imdb-logo' }, 'IMDb'), el('span', { class: 'imdb-score' }, '...')]);
-      meta.appendChild(badge);
-      if (window.imdbCache && window.imdbCache[d.id]) {
-        badge.querySelector('.imdb-score').innerHTML = `<b>${Number(window.imdbCache[d.id]).toFixed(1)}</b>/10`;
-      } else {
-        fetch('/api/discover/imdb-ratings', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ items: [{ id: d.id, media }] }) })
-        .then(r => r.json()).then(r => {
-          if (r && r.ratings && r.ratings[d.id]) {
-            badge.querySelector('.imdb-score').innerHTML = `<b>${Number(r.ratings[d.id]).toFixed(1)}</b>/10`;
-            if (window.imdbCache) window.imdbCache[d.id] = r.ratings[d.id];
-          } else badge.remove();
-        }).catch(() => badge.remove());
-      }
-    }
   // Episode-% ring right after the IMDb badge (TV only, when owned).
   if (media === 'tv' && d.episodePercent != null) {
     const full = d.episodePercent >= 100;
@@ -1369,16 +1563,37 @@ function renderMetadataBlock(d, media) {
   if (d.cast && d.cast.length) {
     body.appendChild(el('div', { class: 'section-label' }, 'Cast · tap an actor'));
     const cast = el('div', { class: 'cast-row' });
-    d.cast.forEach((p) => { const cc = el('div', { class: 'cast', tabindex: '0', 'data-nav': '', style: 'cursor:pointer' }, [p.photo ? el('img', { src: p.photo, loading: 'lazy', alt: p.name }) : el('div', { class: 'cast-ph' }, '👤'), el('div', { class: 'cast-name' }, p.name), el('div', { class: 'cast-char' }, p.character || '')]); cc.addEventListener('click', () => openPerson(p)); cast.appendChild(cc); });
-    body.appendChild(cast);
+    d.cast.forEach((p) => {
+      // Portrait tile: headshot fills the card, caption rides a scrim on top.
+      const media = p.photo
+        ? el('img', { src: p.photo, loading: 'lazy', alt: p.name })
+        : el('div', { class: 'cast-ph', 'aria-hidden': 'true' }, initials(p.name));
+      const cc = el('div', {
+        class: 'cast', tabindex: '0', 'data-nav': '', role: 'button',
+        'aria-label': p.character ? `${p.name} as ${p.character}` : p.name,
+        style: 'cursor:pointer'
+      }, [
+        media,
+        el('div', { class: 'cast-info' }, [
+          el('div', { class: 'cast-name' }, p.name),
+          p.character ? el('div', { class: 'cast-char' }, p.character) : null
+        ])
+      ]);
+      cc.addEventListener('click', () => openPerson(p));
+      cast.appendChild(cc);
+    });
+    body.appendChild(railWithArrows(cast));
   }
   const more = (d.recommendations && d.recommendations.length ? d.recommendations : d.similar) || [];
-  if (more.length) { body.appendChild(el('div', { class: 'section-label' }, 'More like this')); const row = el('div', { class: 'cast-row' }); more.forEach((m) => row.appendChild(card(normalize(m, m.media)))); body.appendChild(row); }
+  if (more.length) { body.appendChild(el('div', { class: 'section-label' }, 'More like this')); const row = el('div', { class: 'cast-row' }); more.forEach((m) => row.appendChild(card(normalize(m, m.media)))); body.appendChild(railWithArrows(row)); }
   cardEl.appendChild(body); cardEl.scrollTop = 0;
 }
 async function openPerson(person) {
   const modal = document.getElementById('modal'); const cardEl = document.getElementById('modalCard');
   modal.classList.remove('hidden');
+  applyScrollLock();
+  clearSheetDrag(cardEl);
+  enableSheetDrag(cardEl, closeModal);
   cardEl.innerHTML = '<div style="padding:60px;text-align:center;color:var(--muted)">Loading…</div>';
   document.getElementById('modalBackdrop').onclick = closeModal;
   const p = await api('/api/discover/person/' + person.id);
@@ -1388,13 +1603,19 @@ async function openPerson(person) {
   cardEl.appendChild(el('div', { class: 'modal-body', style: 'padding-bottom:6px' }, [el('div', { style: 'display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap' }, [p.photo ? el('img', { src: p.photo, alt: p.name, style: 'width:120px;height:120px;border-radius:16px;object-fit:cover;background:#262633' }) : el('div', { class: 'cast-ph', style: 'width:120px;height:120px;border-radius:16px;font-size:40px' }, '👤'), el('div', { style: 'flex:1;min-width:240px' }, [el('h2', { class: 'modal-title', style: 'font-size:30px' }, p.name), p.department ? el('div', { class: 'modal-tagline' }, p.department + (p.place ? ` · ${p.place}` : '')) : null, el('div', { class: 'modal-meta' }, [el('span', { class: 'chip' }, `${p.counts.library} in your library`), el('span', { class: 'chip' }, `${p.counts.total} credits`), p.imdbUrl ? el('a', { class: 'btn btn-imdb', 'data-nav': '', href: p.imdbUrl, target: '_blank', rel: 'noopener', style: 'padding:6px 12px' }, 'IMDb ↗') : null]), p.biography ? el('p', { class: 'modal-overview', style: 'margin-top:10px' }, p.biography) : null])])]));
   const body = el('div', { class: 'modal-body', style: 'padding-top:0' });
   body.appendChild(el('div', { class: 'section-label' }, `In your library · ${p.name.split(' ')[0]}`));
-  if (p.inLibrary && p.inLibrary.length) { const row = el('div', { class: 'cast-row' }); p.inLibrary.forEach((m) => row.appendChild(personCard(m))); body.appendChild(row); }
+  if (p.inLibrary && p.inLibrary.length) { const row = el('div', { class: 'cast-row' }); p.inLibrary.forEach((m) => row.appendChild(personCard(m))); body.appendChild(railWithArrows(row)); }
   else body.appendChild(el('div', { class: 'row-sub', style: 'margin-bottom:6px' }, 'Nothing yet — request something from "Known for" below.'));
-  if (p.knownFor && p.knownFor.length) { body.appendChild(el('div', { class: 'section-label' }, 'Known for (acting) · tap ＋ to send to your systems')); const row = el('div', { class: 'cast-row' }); p.knownFor.forEach((m) => row.appendChild(personCard(m))); body.appendChild(row); }
-  if (p.crewKnownFor && p.crewKnownFor.length) { body.appendChild(el('div', { class: 'section-label' }, 'Directed · written · produced · tap ＋ to request')); const row = el('div', { class: 'cast-row' }); p.crewKnownFor.forEach((m) => row.appendChild(personCard(m))); body.appendChild(row); }
+  if (p.knownFor && p.knownFor.length) { body.appendChild(el('div', { class: 'section-label' }, 'Known for (acting) · tap ＋ to send to your systems')); const row = el('div', { class: 'cast-row' }); p.knownFor.forEach((m) => row.appendChild(personCard(m))); body.appendChild(railWithArrows(row)); }
+  if (p.crewKnownFor && p.crewKnownFor.length) { body.appendChild(el('div', { class: 'section-label' }, 'Directed · written · produced · tap ＋ to request')); const row = el('div', { class: 'cast-row' }); p.crewKnownFor.forEach((m) => row.appendChild(personCard(m))); body.appendChild(railWithArrows(row)); }
   cardEl.appendChild(body); cardEl.scrollTop = 0;
 }
-function closeModal() { document.getElementById('modalCard').innerHTML = ''; document.getElementById('modal').classList.add('hidden'); }
+function closeModal() {
+  const card = document.getElementById('modalCard');
+  clearSheetDrag(card);
+  card.innerHTML = '';
+  document.getElementById('modal').classList.add('hidden');
+  releaseScrollLock();
+}
 document.addEventListener('nav:back', () => {
   const rq = document.getElementById('requestModal');
   if (rq && !rq.classList.contains('hidden')) { closeRequestModal(); return; }
@@ -1408,8 +1629,11 @@ async function openRequestModal(item) {
   let host = document.getElementById('requestModal');
   if (!host) { host = document.createElement('div'); host.id = 'requestModal'; host.className = 'req-overlay'; document.body.appendChild(host); }
   host.classList.remove('hidden');
+  applyScrollLock('request');
   host.innerHTML = `<div class="req-backdrop"></div><div class="req-card"><div class="req-loading">Loading options…</div></div>`;
   host.querySelector('.req-backdrop').onclick = closeRequestModal;
+  // .req-card is rebuilt on every open, so this binds a fresh element each time.
+  enableSheetDrag(host.querySelector('.req-card'), closeRequestModal);
   const opts = await api('/api/request/options?media=' + media);
   const cardEl = host.querySelector('.req-card');
   if (opts.error) { cardEl.innerHTML = requestHeader(media, item) + `<div class="req-body"><div class="req-note bad">⚠ ${opts.error}</div></div><div class="req-footer"><button class="btn btn-ghost" id="reqCancel">Close</button></div>`; cardEl.style.setProperty('--req-bg', item.backdrop ? `url(${item.backdrop})` : 'none'); host.querySelector('#reqCancel').onclick = closeRequestModal; return; }
@@ -1568,15 +1792,87 @@ function requestHeader(media, item) {
     <div class="req-name">${item.title || ''}</div>
   </div>`;
 }
-function closeRequestModal() { const host = document.getElementById('requestModal'); if (host) host.classList.add('hidden'); }
+function closeRequestModal() { const host = document.getElementById('requestModal'); if (host) host.classList.add('hidden'); releaseScrollLock('request'); }
+// Wraps a horizontal scroller so mouse users get arrows and everyone gets a
+// "there's more" edge fade. Returns the shell to append in the scroller's place.
+function railWithArrows(scrollEl) {
+  const shell = el('div', { class: 'rail' });
+  const mk = (cls, label, glyph) => el('button', {
+    class: 'rail-arrow ' + cls, type: 'button', 'data-nav': '', 'aria-label': label, title: label
+  }, glyph);
+  const prev = mk('prev', 'Scroll left', '‹');
+  const next = mk('next', 'Scroll right', '›');
+  shell.append(prev, scrollEl, next);
+
+  const sync = () => {
+    const max = scrollEl.scrollWidth - scrollEl.clientWidth;
+    shell.classList.toggle('no-scroll', max <= 1);
+    shell.classList.toggle('at-start', scrollEl.scrollLeft <= 1);
+    shell.classList.toggle('at-end', scrollEl.scrollLeft >= max - 1);
+  };
+  // Hand-rolled easing rather than scrollBy({behavior:'smooth'}). enhance.css
+  // forces `scroll-behavior: auto !important` on these rails, and in that state
+  // the native smooth scroll was observed to stall after a few pixels. A rAF
+  // tween is unaffected by the CSS property and behaves identically everywhere.
+  const animate = (delta, ms = 380) => {
+    const max = scrollEl.scrollWidth - scrollEl.clientWidth;
+    const from = scrollEl.scrollLeft;
+    const to = Math.max(0, Math.min(max, from + delta));
+    let reduced = false;
+    try { reduced = matchMedia('(prefers-reduced-motion: reduce)').matches; } catch {}
+    if (reduced || to === from) { scrollEl.scrollLeft = to; sync(); return; }
+    const t0 = performance.now();
+    const step = (now) => {
+      const p = Math.min(1, (now - t0) / ms);
+      scrollEl.scrollLeft = from + (to - from) * (1 - Math.pow(1 - p, 3)); // easeOutCubic
+      if (p < 1) requestAnimationFrame(step); else sync();
+    };
+    requestAnimationFrame(step);
+  };
+  // Leave a sliver of the current edge tile visible so the jump reads as a pan.
+  const nudge = (dir) => animate(dir * Math.max(220, scrollEl.clientWidth * 0.85));
+  prev.addEventListener('click', () => nudge(-1));
+  next.addEventListener('click', () => nudge(1));
+  scrollEl.addEventListener('scroll', sync, { passive: true });
+  if (window.ResizeObserver) { try { new ResizeObserver(sync).observe(scrollEl); } catch {} }
+  requestAnimationFrame(sync);
+  return shell;
+}
+
+// Two-letter monogram for cast members TMDB has no headshot for.
+function initials(name) {
+  const parts = String(name || '').trim().split(/s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
+}
 function isTop(title) { return /· Top 10$/.test(title || '') || /Top 250/.test(title || ''); }
 function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 function normalize(c, media) {
   return { id: c.id, media: media || c.media || c.media_type || (c.title ? 'movie' : 'tv'), title: c.title || c.name, year: c.year || (c.release_date || c.first_air_date || '').slice(0, 4), overview: c.overview, poster: c.poster || (c.poster_path ? `https://image.tmdb.org/t/p/w500${c.poster_path}` : null), backdrop: c.backdrop || (c.backdrop_path ? `https://image.tmdb.org/t/p/w1280${c.backdrop_path}` : null), rating: c.rating || c.vote_average, why: c.why };
 }
-function setAmbient(url) { if (!url) return; ambient.style.backgroundImage = `url(${url})`; ambient.style.opacity = '1'; }
+function setAmbient(url) {
+  if (!url) return;
+  // The ambient wash is heavily blurred and scaled, so it never needs more
+  // than a small image — this used to hold a second full w1280 decode.
+  ambient.style.backgroundImage = `url(${tmdbSized(url, 'w300')})`;
+  ambient.style.opacity = '1';
+}
 function skeleton() { const cards = Array.from({ length: 7 }).map(() => '<div class="skeleton"></div>').join(''); return `<div style="height:40vh"></div><div class="row-head"><div class="row-title">Loading…</div></div><div class="skeleton-row">${cards}</div><div class="skeleton-row">${cards}</div>`; }
 function emptyState(title, sub, showSettings) { return el('div', { class: 'empty' }, [el('h3', {}, title), el('p', {}, sub || ''), showSettings ? el('button', { class: 'btn btn-accent', 'data-nav': '', style: 'margin-top:16px', onclick: () => openSettings(false) }, 'Open Settings') : null]); }
+// Upstream failures used to be indistinguishable from "nothing here": routes
+// answer 200 with { error, rows: [] }, so a TMDB or Plex outage rendered as an
+// empty shelf and read as a broken app. This states what failed and offers a
+// real retry.
+function errorState(title, detail, onRetry) {
+  return el('div', { class: 'empty' }, [
+    el('h3', {}, title),
+    el('p', {}, detail || ''),
+    el('div', { style: 'display:flex;gap:10px;justify-content:center;margin-top:16px;flex-wrap:wrap' }, [
+      onRetry ? el('button', { class: 'btn btn-accent', 'data-nav': '', onclick: onRetry }, 'Retry') : null,
+      el('button', { class: 'btn', 'data-nav': '', onclick: () => openSettings(false) }, 'Open Settings')
+    ])
+  ]);
+}
 function focusFirstCard() { setTimeout(() => { const first = document.querySelector('.hero-actions .btn, .card, .status-card, .seg button'); if (first) setFocus(first); }, 120); }
 boot();
 

@@ -1,28 +1,41 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>NickSeer</title>
+  
+  <!-- PWA & Mobile Native App Specs -->
   <link rel="manifest" href="/manifest.json" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="NickSeer" />
   <meta name="application-name" content="NickSeer" />
-  <meta name="theme-color" content="#0a0e17" />
-  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
-  <meta name="theme-color" content="#0a0a0f" />
-  <title>NickSeer</title>
+  <meta name="theme-color" content="#07090e" />
+  <meta name="format-detection" content="telephone=no" />
+
+  <!-- High-Res Native App Icons -->
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  <link rel="apple-touch-icon" href="/favicon.svg" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+  <!-- iOS launch images. Without these the standalone PWA flashes white
+       on every cold launch before the shell paints. -->
+  <link rel="apple-touch-startup-image" href="/splash/splash-1290x2796.png" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3)" />
+  <link rel="apple-touch-startup-image" href="/splash/splash-1179x2556.png" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3)" />
+  <link rel="apple-touch-startup-image" href="/splash/splash-1284x2778.png" media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3)" />
+  <link rel="apple-touch-startup-image" href="/splash/splash-1170x2532.png" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3)" />
+  <link rel="apple-touch-startup-image" href="/splash/splash-1125x2436.png" media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3)" />
+  <link rel="apple-touch-startup-image" href="/splash/splash-828x1792.png" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2)" />
+  <link rel="apple-touch-startup-image" href="/splash/splash-750x1334.png" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2)" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+  <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
+
   <link rel="preconnect" href="https://image.tmdb.org" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/styles.css?v=20260903_1625" />
-  <link rel="stylesheet" href="/css/enhance.css?v=20260905_1642" />
-  <link rel="stylesheet" href="/css/theme.css?v=20260902_1127" />
+  <link rel="stylesheet" href="/css/styles.css?v=20260916_0245" />
+  <link rel="stylesheet" href="/css/enhance.css?v=20260916_0245" />
+  <link rel="stylesheet" href="/css/theme.css?v=20260916_0245" />
 </head>
 <body>
   <div id="ambient" class="ambient"></div>
@@ -135,31 +148,50 @@
     </button>
   </nav>
 
-  <script type="module" src="/js/nav.js?v=20260903_1628"></script>
-  <script type="module" src="/js/settings.js?v=20260902_1127"></script>
-  <script type="module" src="/js/app.js?v=20260905_1642"></script>
-  <script type="module" src="/js/collections.js?v=20260903_1343"></script>
-  <script type="module" src="/js/logo.js?v=20260902_1127"></script>
-  <script type="module" src="/js/brands.js?v=20260902_1127"></script>
-  <script type="module" src="/js/menu.js?v=20260902_1127"></script>
-  <script type="module" src="/js/plexcard.js?v=20260902_1127"></script>
-  <script type="module" src="/js/stats.js?v=20260902_1127"></script>
-  <script type="module" src="/js/live.js?v=20260902_1127"></script>
-  <script type="module" src="/js/info.js?v=20260902_1127"></script>
-  <script type="module" src="/js/settings-ai.js?v=20260902_1127"></script>
-  <script type="module" src="/js/settings-tuning.js?v=20260902_1127"></script>
-  <script type="module" src="/js/aisuggest.js?v=20260902_1127"></script>
-  <script type="module" src="/js/buttons.js?v=20260902_1127"></script>
-  <script type="module" src="/js/approvals.js?v=20260903_1300"></script>
-  <script type="module" src="/js/roles.js?v=20260902_1127"></script>
-  <script type="module" src="/js/imdb-badge.js?v=20260902_1127"></script>
-  <script type="module" src="/js/fixes.js?v=20260902_1127"></script>
-  <script type="module" src="/js/login-enhance.js?v=20260902_1127"></script>
+  <script type="module" src="/js/nav.js"></script>
+  <script type="module" src="/js/settings.js"></script>
+  <script type="module" src="/js/app.js"></script>
+  <script type="module" src="/js/collections.js?v=20260916_0245"></script>
+  <script type="module" src="/js/logo.js?v=20260916_0245"></script>
+  <script type="module" src="/js/brands.js?v=20260916_0245"></script>
+  <script type="module" src="/js/menu.js?v=20260916_0245"></script>
+  <script type="module" src="/js/plexcard.js?v=20260916_0245"></script>
+  <script type="module" src="/js/stats.js?v=20260916_0245"></script>
+  <script type="module" src="/js/live.js?v=20260916_0245"></script>
+  <script type="module" src="/js/info.js?v=20260916_0245"></script>
+  <script type="module" src="/js/settings-ai.js?v=20260916_0245"></script>
+  <script type="module" src="/js/settings-tuning.js?v=20260916_0245"></script>
+  <script type="module" src="/js/aisuggest.js?v=20260916_0245"></script>
+  <script type="module" src="/js/buttons.js?v=20260916_0245"></script>
+  <script type="module" src="/js/approvals.js?v=20260916_0245"></script>
+  <script type="module" src="/js/roles.js?v=20260916_0245"></script>
+  <script type="module" src="/js/imdb-badge.js?v=20260916_0245"></script>
+  <script type="module" src="/js/fixes.js?v=20260916_0245"></script>
+  <script type="module" src="/js/a2hs.js?v=20260916_0245"></script>
+  <script type="module" src="/js/login-enhance.js"></script>
 
-  <!-- Mobile Bottom Navigation Bar -->
-  
-
-  
+  <!-- PWA Service Worker Registration -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' })
+          .then((reg) => {
+            console.log('[PWA] ServiceWorker registered with scope:', reg.scope);
+            reg.onupdatefound = () => {
+              const worker = reg.installing;
+              if (worker) {
+                worker.onstatechange = () => {
+                  if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+                    console.log('[PWA] New version installed and ready.');
+                  }
+                };
+              }
+            };
+          })
+          .catch((err) => console.warn('[PWA] ServiceWorker registration failed:', err));
+      });
+    }
+  </script>
 </body>
 </html>
 

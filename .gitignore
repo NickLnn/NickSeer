@@ -50,3 +50,10 @@ GEMINI.md
 *.sqlite
 _backup_*.js
 *.cs
+
+# Local agent/session state (Claude Code)
+.claude/
+
+# msys/Git-Bash stray temp files
+.msys*
+public/.msys*

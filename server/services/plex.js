@@ -17,7 +17,7 @@ async function call(pathname, params = {}, custom = {}) {
   const url = new URL(base + pathname);
   url.searchParams.set('X-Plex-Token', token);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  const res = await fetch(url, { headers: { Accept: 'application/json' } });
+  const res = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
   if (!res.ok) throw new Error(`plex ${res.status}: ${await res.text()}`);
   return res.json();
 }

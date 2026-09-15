@@ -11,6 +11,11 @@ function today() { return new Date().toISOString().slice(0, 10); }
 function daysAgo(n) { return new Date(Date.now() - n * 86400000).toISOString().slice(0, 10); }
 function daysAhead(n) { return new Date(Date.now() + n * 86400000).toISOString().slice(0, 10); }
 
+// Node's fetch (undici) applies NO default request timeout. buildCuratedRows()
+// issues ~12 of these concurrently on a cold cache, so a single stalled TMDB
+// connection used to hang the entire page boot indefinitely. Hard cap it.
+const TMDB_TIMEOUT_MS = Number(process.env.TMDB_TIMEOUT_MS || 6000);
+
 async function tmdb(pathname, params = {}) {
   const t = auth();
   const url = new URL(BASE + pathname);
@@ -20,7 +25,7 @@ async function tmdb(pathname, params = {}) {
   else throw new Error('TMDB not configured');
   url.searchParams.set('language', t.language || 'en-US');
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null) url.searchParams.set(k, v);
-  const res = await fetch(url, { headers });
+  const res = await fetch(url, { headers, signal: AbortSignal.timeout(TMDB_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`TMDB ${res.status}: ${await res.text()}`);
   return res.json();
 }

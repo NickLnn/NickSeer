@@ -67,17 +67,41 @@ router.get('/backdrops', async (req, res) => {
 import plexauth from '../services/plexauth.js';
 import auth from '../services/auth.js';
 
+// `role` is deliberately omitted — see the note on /api/auth/profiles.
 router.get('/profiles', (req, res) => {
   const c = load();
   const users = (c.auth?.users || []).map(u => ({
     id: u.username,
     name: u.username,
     thumb: u.thumb || '',
-    role: u.role || 'user',
     isAccount: true,
     plex: !!u.plexToken
   }));
   res.json({ ok: true, profiles: users });
+});
+
+// ---------------------------------------------------------------------------
+// Consolidated boot payload
+// ---------------------------------------------------------------------------
+// Replaces the four serialized requests the client used to make before it
+// could paint anything: /api/auth/status -> /api/auth/me -> /api/health ->
+// /api/auth/me (again, from updateRoleVisibility). One round trip now.
+router.get('/bootstrap', (req, res) => {
+  const c = load();
+  const tok = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
+  const u = tok ? auth.verifyToken(tok) : null;
+
+  res.json({
+    auth: {
+      enabled: auth.isEnabled(),
+      hasAdmin: auth.hasAnyAdmin(),
+      plexLogin: c.plexAuth?.enabled !== false,
+      approvals: !!c.auth?.approvals
+    },
+    me: u ? { ok: true, user: u } : { ok: false },
+    health: { ok: true, app: c.app.name, configured: !!c.configured },
+    isAdmin: u?.role === 'admin'
+  });
 });
 
 router.post('/plex/pin', async (req, res) => {

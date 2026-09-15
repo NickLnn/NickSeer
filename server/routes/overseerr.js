@@ -10,19 +10,34 @@ import fs from 'fs';
 
 const router = express.Router();
 
-router.use((req, res, next) => {
-  try {
-    fs.appendFileSync('requestrr_debug.log', `${new Date().toISOString()} | ${req.method} ${req.url} | Body: ${JSON.stringify(req.body)}\n`);
-  } catch(e) {}
-  next();
-});
+// Request tracing. Was unconditional appendFileSync on EVERY /api/v1 call —
+// a blocking write on the hot path, an unbounded file, and it recorded full
+// request bodies in plaintext next to the source. Opt in with
+// REQUESTRR_DEBUG=1 when you actually need to diagnose a payload.
+if (process.env.REQUESTRR_DEBUG === '1') {
+  router.use((req, res, next) => {
+    try {
+      fs.appendFile('requestrr_debug.log',
+        `${new Date().toISOString()} | ${req.method} ${req.url} | Body: ${JSON.stringify(req.body)}\n`,
+        () => {});
+    } catch (e) { /* never let tracing break a request */ }
+    next();
+  });
+}
 
-// Middleware to validate X-Api-Key
+// Middleware to validate X-Api-Key.
+// Hardened: no hardcoded fallback (a publicly-known default key on any
+// unconfigured install), and a constant-time comparison.
 router.use((req, res, next) => {
-  const { services } = load();
-  const validKey = services.overseerr?.apikey || 'nickseer-requestrr-key';
-  const providedKey = req.headers['x-api-key'];
-  if (providedKey !== validKey) {
+  const cfg = load();
+  const validKey = cfg.services?.overseerr?.apikey || cfg.api?.key || process.env.NICKSEER_API_KEY || '';
+  if (!validKey) {
+    return res.status(503).json({ error: 'Overseerr API key not configured' });
+  }
+  const providedKey = String(req.headers['x-api-key'] || '');
+  const a = Buffer.from(providedKey);
+  const b = Buffer.from(validKey);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
     return res.status(403).json({ error: 'Forbidden' });
   }
   next();
@@ -140,22 +155,52 @@ router.get('/search', async (req, res) => {
   if (query.startsWith('tvdb:')) {
     try {
       const tvdbId = query.split(':')[1];
-      const tmdbRes = await tmdb.find(tvdbId, 'tvdb_id');
+      const tmdbRes = await tmdb.find(tvdbId, 'tvdb_id').catch(() => null);
       const tvResults = tmdbRes?.tv_results || [];
-      const results = tvResults.map(r => ({
-        ...r,
-        id: r.id,
-        title: r.name || r.title || '',
-        name: r.name || r.title || '',
-        posterPath: r.poster_path || '',
-        backdropPath: r.backdrop_path || '',
-        releaseDate: r.first_air_date || r.release_date || '',
-        firstAirDate: r.first_air_date || r.release_date || '',
-        mediaType: 'tv',
-        seasons: [],
-        mediaInfo: { status: 1, requests: [], seasons: [] }
-      }));
-      return res.json({ page: 1, totalPages: 1, totalResults: results.length, results });
+      if (tvResults.length) {
+        const results = tvResults.map(r => ({
+          ...r,
+          id: r.id,
+          title: r.name || r.title || '',
+          name: r.name || r.title || '',
+          posterPath: r.poster_path || '',
+          backdropPath: r.backdrop_path || '',
+          releaseDate: r.first_air_date || r.release_date || '',
+          firstAirDate: r.first_air_date || r.release_date || '',
+          mediaType: 'tv',
+          seasons: [],
+          mediaInfo: { status: 1, requests: [], seasons: [], tvdbId: Number(tvdbId), tmdbId: r.id },
+          externalIds: { tvdbId: Number(tvdbId) }
+        }));
+        return res.json({ page: 1, totalPages: 1, totalResults: results.length, results });
+      }
+
+      // Fallback: lookup directly in Sonarr
+      try {
+        const sonarrLookup = await arr.lookup('sonarr', null, { tvdbId });
+        const seriesList = Array.isArray(sonarrLookup) ? sonarrLookup : (sonarrLookup ? [sonarrLookup] : []);
+        if (seriesList.length) {
+          const results = seriesList.map(s => {
+            const pImg = s.images?.find(x => x.coverType === 'poster') || s.images?.[0];
+            return {
+              id: Number(tvdbId),
+              title: s.title || '',
+              name: s.title || '',
+              posterPath: pImg?.remoteUrl || pImg?.url || '',
+              backdropPath: '',
+              releaseDate: s.year ? `${s.year}-01-01` : '',
+              firstAirDate: s.year ? `${s.year}-01-01` : '',
+              mediaType: 'tv',
+              seasons: (s.seasons || []).map(sn => ({ id: sn.seasonNumber, seasonNumber: sn.seasonNumber })),
+              mediaInfo: { status: 1, requests: [], seasons: [], tvdbId: Number(tvdbId) },
+              externalIds: { tvdbId: Number(tvdbId) }
+            };
+          });
+          return res.json({ page: 1, totalPages: 1, totalResults: results.length, results });
+        }
+      } catch {}
+
+      return res.json({ page: 1, totalPages: 1, totalResults: 0, results: [] });
     } catch(e) {
       return res.json({ page: 1, totalPages: 1, totalResults: 0, results: [] });
     }
@@ -197,17 +242,34 @@ const getMediaInfo = async (media, id) => {
     if (!numericId && numericId !== 0) return null;
 
     let data = null;
-    try {
-      data = await tmdb.details(media, numericId);
-    } catch (e) {
-      // If TMDB lookup failed for TV, check if id was actually a TVDB ID
-      if (media === 'tv') {
-        try {
-          const tmdbRes = await tmdb.find(numericId, 'tvdb_id');
-          if (tmdbRes?.tv_results?.length) {
-            data = await tmdb.details('tv', tmdbRes.tv_results[0].id);
-          }
-        } catch {}
+    let tvdbId = null;
+
+    if (media === 'tv') {
+      // First check if numericId matches a known TVDB ID via tmdb.find
+      try {
+        const tmdbRes = await tmdb.find(numericId, 'tvdb_id');
+        if (tmdbRes?.tv_results?.length) {
+          const match = tmdbRes.tv_results[0];
+          data = await tmdb.details('tv', match.id).catch(() => match);
+          tvdbId = numericId;
+        }
+      } catch {}
+    }
+
+    if (!data) {
+      try {
+        data = await tmdb.details(media, numericId);
+      } catch (e) {
+        // If TMDB lookup failed for TV, check if id was actually a TVDB ID
+        if (media === 'tv') {
+          try {
+            const tmdbRes = await tmdb.find(numericId, 'tvdb_id');
+            if (tmdbRes?.tv_results?.length) {
+              data = await tmdb.details('tv', tmdbRes.tv_results[0].id);
+              tvdbId = numericId;
+            }
+          } catch {}
+        }
       }
     }
     if (!data) return null;
@@ -230,9 +292,8 @@ const getMediaInfo = async (media, id) => {
       status = 5; // Available
     }
 
-    let tvdbId = null;
     if (data.external_ids && data.external_ids.tvdb_id) {
-      tvdbId = data.external_ids.tvdb_id;
+      tvdbId = tvdbId || data.external_ids.tvdb_id;
     }
 
     // Match any existing requests in NickSeer queue
@@ -276,6 +337,21 @@ const getMediaInfo = async (media, id) => {
     const releaseDate = data.release_date || data.first_air_date || '';
     const firstAirDate = data.first_air_date || data.release_date || '';
 
+    // Poster fallback for TV if TMDB has no poster
+    let posterPath = data.poster_path || '';
+    if (!posterPath && media === 'tv') {
+      try {
+        const sonarrMatch = await arr.lookup('sonarr', data.id, { tvdbId }).catch(() => null);
+        const seriesItem = Array.isArray(sonarrMatch) ? sonarrMatch[0] : sonarrMatch;
+        if (seriesItem?.images?.length) {
+          const posterImg = seriesItem.images.find(img => img.coverType === 'poster') || seriesItem.images[0];
+          if (posterImg?.remoteUrl) {
+            posterPath = posterImg.remoteUrl;
+          }
+        }
+      } catch {}
+    }
+
     // Root seasons array
     const seasons = (data.seasons || []).map(s => ({
       id: s.id,
@@ -300,7 +376,7 @@ const getMediaInfo = async (media, id) => {
       id: data.id,
       title,
       name,
-      posterPath: data.poster_path || '',
+      posterPath: posterPath || data.poster_path || '',
       backdropPath: data.backdrop_path || '',
       releaseDate,
       firstAirDate,
@@ -349,16 +425,24 @@ function mustQueue(c, isAdmin) {
 
 // 6. Request
 router.post('/request', async (req, res) => {
-  let { mediaType, mediaId, seasons, tvdbId } = req.body;
+  let { mediaType, mediaId, seasons, tvdbId, title: bodyTitle, poster: bodyPoster } = req.body || {};
   
+  // Support payload aliases
+  mediaType = mediaType || req.body?.media_type || req.body?.type;
+  mediaId = mediaId ?? req.body?.media_id ?? req.body?.tmdbId ?? req.body?.tmdb_id ?? req.body?.id;
+  tvdbId = tvdbId ?? req.body?.tvdb_id ?? req.body?.theTvDbId ?? req.body?.thetvdbId;
+
   // Requestrr / external requesters might send variants of media types
-  if (mediaType === 'series') mediaType = 'tv';
+  if (mediaType === 'series' || mediaType === 'show') mediaType = 'tv';
   if (mediaType === 'movies') mediaType = 'movie';
+
+  // If tvdbId was provided but not mediaId, use tvdbId as mediaId
+  if (!mediaId && tvdbId) mediaId = tvdbId;
   
   if (!mediaType || !mediaId) return res.status(400).json({ error: 'Missing mediaType or mediaId' });
   
   // Resolve User ID from Requestrr
-  const xApiUser = req.headers['x-api-user'] || req.body.userId;
+  const xApiUser = req.headers['x-api-user'] || req.body?.userId;
   let username = 'Requestrr Bot';
   let userObj = null;
   
@@ -375,33 +459,123 @@ router.post('/request', async (req, res) => {
     }
   }
 
-    // Note: Overseerr doesn't pass the title in the POST body, only ID. We must fetch it!
-  let title = `TMDB ID: ${mediaId}`;
-  let poster = '';
-  try {
-    const tmdbData = await tmdb.details(mediaType === 'tv' ? 'tv' : 'movie', mediaId);
-    if (tmdbData) {
-      title = tmdbData.title || tmdbData.name || title;
-      poster = tmdb.img(tmdbData.poster_path) || '';
+  let title = bodyTitle || (mediaType === 'tv' ? `TV Show (ID: ${mediaId})` : `Movie (ID: ${mediaId})`);
+  let poster = bodyPoster || req.body?.posterPath || req.body?.banner || '';
+  let resolvedTmdbId = null;
+  let resolvedTvdbId = tvdbId ? Number(tvdbId) : null;
+
+  if (mediaType === 'tv') {
+    // 1. Try resolving via tvdb_id on TMDB if candidate TVDB id exists
+    const candidateTvdb = resolvedTvdbId || (Number(mediaId) > 0 ? Number(mediaId) : null);
+    if (candidateTvdb) {
+      try {
+        const findRes = await tmdb.find(candidateTvdb, 'tvdb_id');
+        if (findRes?.tv_results?.length) {
+          const match = findRes.tv_results[0];
+          resolvedTmdbId = match.id;
+          resolvedTvdbId = candidateTvdb;
+          title = match.name || match.title || title;
+          if (!poster && match.poster_path) {
+            poster = tmdb.img(match.poster_path) || '';
+          }
+        }
+      } catch (e) {
+        console.warn('[overseerr:request] tmdb.find by tvdb_id failed:', e.message);
+      }
     }
-  } catch (e) {
-    console.error('Failed to fetch TMDB details for Requestrr mock:', e.message);
+
+    // 2. If not yet resolved or poster still empty, check tmdb.details
+    if (!resolvedTmdbId) {
+      try {
+        const tmdbData = await tmdb.details('tv', mediaId);
+        if (tmdbData) {
+          resolvedTmdbId = tmdbData.id;
+          title = tmdbData.name || tmdbData.title || title;
+          if (!poster && tmdbData.poster_path) {
+            poster = tmdb.img(tmdbData.poster_path) || '';
+          }
+          if (!resolvedTvdbId && tmdbData.external_ids?.tvdb_id) {
+            resolvedTvdbId = Number(tmdbData.external_ids.tvdb_id);
+          }
+        }
+      } catch (e) {
+        console.warn('[overseerr:request] tmdb.details tv failed:', e.message);
+      }
+    }
+
+    // 3. If poster is still empty, query Sonarr for TVDB artwork
+    if (!poster) {
+      try {
+        const sonarrMatch = await arr.lookup('sonarr', resolvedTmdbId || mediaId, { tvdbId: resolvedTvdbId }).catch(() => null);
+        const seriesItem = Array.isArray(sonarrMatch) ? sonarrMatch[0] : sonarrMatch;
+        if (seriesItem) {
+          if (title.startsWith('TV Show (ID:') || title.startsWith('TMDB ID:')) {
+            title = seriesItem.title || title;
+          }
+          if (!resolvedTvdbId && seriesItem.tvdbId) resolvedTvdbId = seriesItem.tvdbId;
+          if (seriesItem.images?.length) {
+            const p = seriesItem.images.find(x => x.coverType === 'poster') || seriesItem.images.find(x => x.coverType === 'banner') || seriesItem.images[0];
+            if (p?.remoteUrl || p?.url) {
+              poster = p.remoteUrl || p.url;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[overseerr:request] sonarr poster fallback lookup failed:', e.message);
+      }
+    }
+
+    if (!resolvedTmdbId) resolvedTmdbId = Number(mediaId) || mediaId;
+  } else {
+    // Movie flow
+    resolvedTmdbId = Number(mediaId) || mediaId;
+    try {
+      const tmdbData = await tmdb.details('movie', mediaId);
+      if (tmdbData) {
+        title = tmdbData.title || tmdbData.name || title;
+        if (!poster && tmdbData.poster_path) {
+          poster = tmdb.img(tmdbData.poster_path) || '';
+        }
+      }
+    } catch (e) {
+      console.warn('[overseerr:request] tmdb movie details failed:', e.message);
+    }
+    if (!poster) {
+      try {
+        const radarrMatch = await arr.lookup('radarr', mediaId).catch(() => null);
+        const movieItem = Array.isArray(radarrMatch) ? radarrMatch[0] : radarrMatch;
+        if (movieItem?.images?.length) {
+          const p = movieItem.images.find(x => x.coverType === 'poster') || movieItem.images[0];
+          if (p?.remoteUrl || p?.url) poster = p.remoteUrl || p.url;
+        }
+      } catch {}
+    }
   }
+
+  // Ensure poster is a fully qualified URL
+  if (poster && !poster.startsWith('http')) {
+    poster = `https://image.tmdb.org/t/p/w500${poster.startsWith('/') ? '' : '/'}${poster}`;
+  }
+
   const kind = mediaType === 'tv' ? 'sonarr' : 'radarr';
   const isAdmin = userObj && userObj.role === 'admin';
   
   if (mustQueue(cfg, isAdmin)) {
     const all = load().requests || [];
-    if (all.find((r) => r.status === 'pending' && ((tvdbId && String(r.tvdbId) === String(tvdbId)) || (!tvdbId && String(r.tmdbId) === String(mediaId))) && r.media === mediaType)) {
-      return res.json({ id: Math.floor(Math.random() * 100000), media: { tmdbId: mediaId, status: 2 } });
+    if (all.find((r) => r.status === 'pending' && r.media === mediaType && (
+      (resolvedTvdbId && r.tvdbId && String(r.tvdbId) === String(resolvedTvdbId)) ||
+      (resolvedTmdbId && r.tmdbId && String(r.tmdbId) === String(resolvedTmdbId)) ||
+      (String(r.tmdbId) === String(mediaId))
+    ))) {
+      return res.json({ id: Math.floor(Math.random() * 100000), status: 1, media: { tmdbId: resolvedTmdbId, status: 2 } });
     }
     
     const rq = {
       id: crypto.randomUUID(),
       status: 'pending',
       media: mediaType,
-      tmdbId: mediaId,
-      tvdbId: tvdbId || null,
+      tmdbId: resolvedTmdbId,
+      tvdbId: resolvedTvdbId || null,
       title: title,
       poster: poster,
       by: username,
@@ -416,20 +590,23 @@ router.post('/request', async (req, res) => {
     all.unshift(rq);
     setRequests(all);
     telegram.notify('pending', rq); discord.notify('pending', rq);
-    return res.json({ id: Math.floor(Math.random() * 100000), status: 1, media: { tmdbId: mediaId, status: 2 } });
+    return res.json({ id: Math.floor(Math.random() * 100000), status: 1, media: { tmdbId: resolvedTmdbId, status: 2 } });
   }
   
   try {
-    const idToUse = (mediaType === 'tv' && tvdbId) ? `tvdb:${tvdbId}` : mediaId;
+    const idToUse = (mediaType === 'tv' && resolvedTvdbId) ? `tvdb:${resolvedTvdbId}` : resolvedTmdbId;
     await arr.add(kind, idToUse, { seasons });
-    telegram.notify('autoApproved', { title, poster, media: mediaType, tmdbId: mediaId, by: username, seasons }); discord.notify('autoApproved', { title, poster, media: mediaType, tmdbId: mediaId, by: username, seasons });
-    res.json({ id: Math.floor(Math.random() * 100000), status: 2, media: { tmdbId: mediaId, status: 5 } }); // 5 = Available
+    telegram.notify('autoApproved', { title, poster, media: mediaType, tmdbId: resolvedTmdbId, tvdbId: resolvedTvdbId, by: username, seasons });
+    discord.notify('autoApproved', { title, poster, media: mediaType, tmdbId: resolvedTmdbId, tvdbId: resolvedTvdbId, by: username, seasons });
+    res.json({ id: Math.floor(Math.random() * 100000), status: 2, media: { tmdbId: resolvedTmdbId, status: 5 } }); // 5 = Available
   } catch (e) {
     if (e.message && e.message.toLowerCase().includes('already')) {
-      telegram.notify('available', { title, poster, media: mediaType, tmdbId: mediaId, by: username }); discord.notify('available', { title, poster, media: mediaType, tmdbId: mediaId, by: username });
-      return res.json({ id: Math.floor(Math.random() * 100000), status: 2, media: { tmdbId: mediaId, status: 3 } }); // 3 = Processing / Available
+      telegram.notify('available', { title, poster, media: mediaType, tmdbId: resolvedTmdbId, tvdbId: resolvedTvdbId, by: username });
+      discord.notify('available', { title, poster, media: mediaType, tmdbId: resolvedTmdbId, tvdbId: resolvedTvdbId, by: username });
+      return res.json({ id: Math.floor(Math.random() * 100000), status: 2, media: { tmdbId: resolvedTmdbId, status: 3 } }); // 3 = Processing / Available
     }
-    telegram.notify('failed', { title, poster, media: mediaType, tmdbId: mediaId, by: username }); discord.notify('failed', { title, poster, media: mediaType, tmdbId: mediaId, by: username });
+    telegram.notify('failed', { title, poster, media: mediaType, tmdbId: resolvedTmdbId, tvdbId: resolvedTvdbId, by: username });
+    discord.notify('failed', { title, poster, media: mediaType, tmdbId: resolvedTmdbId, tvdbId: resolvedTvdbId, by: username });
     res.status(500).json({ error: e.message });
   }
 });

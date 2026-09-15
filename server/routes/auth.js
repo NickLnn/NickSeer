@@ -8,7 +8,21 @@ import { load, update } from '../config.js';
 const router = express.Router();
 
 // In-Memory Brute-Force Rate Limiter (5 attempts / 2 min -> 60s lock)
+// NOTE: this is only meaningful now that mini.js refuses to believe a
+// client-supplied CF-Connecting-IP from an untrusted socket.
 const failedLogins = new Map();
+const RATE_MAP_MAX = 5000;
+
+// The map was previously never swept, so entries accumulated until restart.
+function sweepRateLimit(now) {
+  for (const [key, entry] of failedLogins) {
+    const expired = (!entry.lockedUntil || entry.lockedUntil <= now) &&
+                    (now - entry.firstAttempt > 120000);
+    if (expired) failedLogins.delete(key);
+  }
+  // Hard ceiling so a distributed attempt cannot grow this without bound.
+  if (failedLogins.size > RATE_MAP_MAX) failedLogins.clear();
+}
 
 function checkRateLimit(ip) {
   const now = Date.now();
@@ -26,6 +40,7 @@ function checkRateLimit(ip) {
 
 function recordFailedLogin(ip) {
   const now = Date.now();
+  sweepRateLimit(now);
   const entry = failedLogins.get(ip) || { count: 0, firstAttempt: now };
   if (now - entry.firstAttempt > 120000) {
     entry.count = 0;
@@ -43,13 +58,15 @@ function recordSuccessfulLogin(ip) {
 }
 
 
+// Unauthenticated (the login screen needs it to draw the profile picker).
+// `role` is deliberately NOT returned: publishing which account is the admin
+// hands an attacker the exact username to brute-force.
 router.get('/profiles', (req, res) => {
   const c = load();
   const users = (c.auth?.users || []).map(u => ({
     id: u.username,
     name: u.username,
     thumb: u.thumb || '',
-    role: u.role || 'user',
     isAccount: true,
     plex: !!u.plexToken
   }));
@@ -61,16 +78,19 @@ router.get('/status', (req, res) => {
   res.json({ enabled: auth.isEnabled(), hasAdmin: auth.hasAnyAdmin(), plexLogin: c.plexAuth?.enabled !== false, approvals: !!c.auth?.approvals });
 });
 
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
   const ip = req.ip || '127.0.0.1';
   const lockErr = checkRateLimit(ip);
-  if (lockErr) return res.status(200).json({ ok: false, error: lockErr, rateLimited: true });
+  // Real status codes so Cloudflare Rate Limiting can count failures. The
+  // login form reads the JSON body regardless of status, so the UI is
+  // unaffected.
+  if (lockErr) return res.status(429).json({ ok: false, error: lockErr, rateLimited: true });
 
   const { username, password } = req.body || {};
-  const r = auth.login(username, password);
+  const r = await auth.login(username, password);
   if (!r) {
     recordFailedLogin(ip);
-    return res.status(200).json({ ok: false, error: 'Invalid username or password' });
+    return res.status(401).json({ ok: false, error: 'Invalid username or password' });
   }
   recordSuccessfulLogin(ip);
   res.json({ ok: true, token: r.token, user: r.user });
@@ -133,7 +153,7 @@ router.post('/plex/import', async (req, res) => {
         for (const f of (friends || [])) {
           const name = (f.friendlyName || f.username || f.title || '').trim();
           if (name && !existingUsers.has(name.toLowerCase())) {
-            auth.createUser({ username: name, password: Math.random().toString(36).slice(-8), role: 'user' });
+            await auth.createUser({ username: name, password: Math.random().toString(36).slice(-8), role: 'user' });
             existingUsers.add(name.toLowerCase());
             count++;
           }
@@ -151,7 +171,7 @@ router.post('/plex/import', async (req, res) => {
         for (const a of (Array.isArray(accounts) ? accounts : [accounts])) {
           const name = (a.name || a.username || '').trim();
           if (name && !existingUsers.has(name.toLowerCase())) {
-            auth.createUser({ username: name, password: Math.random().toString(36).slice(-8), role: 'user' });
+            await auth.createUser({ username: name, password: Math.random().toString(36).slice(-8), role: 'user' });
             existingUsers.add(name.toLowerCase());
             count++;
           }
@@ -176,13 +196,13 @@ function requireAdmin(req, res) {
   if (!auth.isEnabled()) return true; // pre-auth bootstrap
   const tok = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
   const u = auth.verifyToken(tok);
-  if (!u || u.role !== 'admin') { res.status(200).json({ ok: false, error: 'Admin only' }); return false; }
+  if (!u || u.role !== 'admin') { res.status(403).json({ ok: false, error: 'Admin only' }); return false; }
   return true;
 }
 
 router.get('/users', (req, res) => { if (!requireAdmin(req, res)) return; res.json({ ok: true, enabled: auth.isEnabled(), approvals: !!load().auth?.approvals, users: auth.listUsers() }); });
-router.post('/users', (req, res) => { if (!requireAdmin(req, res)) return; try { const { username, password, role } = req.body || {}; res.json({ ok: true, user: auth.createUser({ username, password, role: role === 'admin' ? 'admin' : 'user' }) }); } catch (e) { res.status(200).json({ ok: false, error: e.message }); } });
-router.post('/users/password', (req, res) => { if (!requireAdmin(req, res)) return; try { const { username, password } = req.body || {}; res.json({ ok: true, user: auth.setPassword(username, password) }); } catch (e) { res.status(200).json({ ok: false, error: e.message }); } });
+router.post('/users', async (req, res) => { if (!requireAdmin(req, res)) return; try { const { username, password, role } = req.body || {}; res.json({ ok: true, user: await auth.createUser({ username, password, role: role === 'admin' ? 'admin' : 'user' }) }); } catch (e) { res.status(200).json({ ok: false, error: e.message }); } });
+router.post('/users/password', async (req, res) => { if (!requireAdmin(req, res)) return; try { const { username, password } = req.body || {}; res.json({ ok: true, user: await auth.setPassword(username, password) }); } catch (e) { res.status(200).json({ ok: false, error: e.message }); } });
 router.post('/users/role', (req, res) => { if (!requireAdmin(req, res)) return; try { const { username, role } = req.body || {}; res.json({ ok: true, user: auth.setRole(username, role === 'admin' ? 'admin' : 'user') }); } catch (e) { res.status(200).json({ ok: false, error: e.message }); } });
 router.post('/users/delete', (req, res) => { if (!requireAdmin(req, res)) return; try { auth.deleteUser((req.body || {}).username); res.json({ ok: true }); } catch (e) { res.status(200).json({ ok: false, error: e.message }); } });
 

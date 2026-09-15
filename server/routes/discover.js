@@ -13,9 +13,35 @@ import engine from '../recommend/engine.js';
 import { aiRerank } from '../recommend/ai.js';
 import { load } from '../config.js';
 import { cached, TTL_DAY, TTL_HOUR } from '../lib/cache.js';
+import { mapLimit } from '../lib/async.js';
+import { allow } from '../lib/ratelimit.js';
+
+// Matches the recommendation engine: 8 concurrent upstream calls keeps us well
+// under the TMDB rate ceiling while collapsing serial round trips into waves.
+const FANOUT = 8;
 
 const router = express.Router();
-const isForce = (req) => req.query.refresh === '1' || req.query.force === '1';
+// `?refresh=1` bypasses every cache layer and triggers the full upstream
+// fan-out, and was previously available to anyone, unlimited — a trivial way to
+// burn the TMDB quota and break discovery for every user.
+//
+// Rather than blocking it (which would silently break the Refresh button), it
+// is rate limited per user. Over the limit we simply serve cached data, so the
+// button still feels responsive and nothing errors.
+const FORCE_MAX = 3;              // forced refreshes...
+const FORCE_WINDOW_MS = 60000;    // ...per minute, per user
+const isForce = (req) => {
+  if (req.query.refresh !== '1' && req.query.force !== '1') return false;
+  // Some handlers call isForce() more than once per request (e.g. /boxoffice
+  // tries two cache keys); decide once so one request spends one token.
+  if (req._forceAllowed !== undefined) return req._forceAllowed;
+  // The internal boot pre-warm loops back through HTTP and must not be limited.
+  if (req.headers['x-nickseer-warm'] === '1') { req._forceAllowed = true; return true; }
+  const who = req.user?.username || req.user?.plexId || req.ip || 'anon';
+  req._forceAllowed = allow(`force:${who}`, FORCE_MAX, FORCE_WINDOW_MS);
+  if (!req._forceAllowed) console.warn(`[ratelimit] refresh throttled for ${who} on ${req.path}`);
+  return req._forceAllowed;
+};
 function mondayKey() { const d = new Date(); const dow = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - dow); return d.toISOString().slice(0, 10); }
 function fmtMoney(n) { if (n == null) return null; if (n >= 1e9) return '$' + (n / 1e9).toFixed(2) + 'B'; if (n >= 1e6) return '$' + (n / 1e6).toFixed(1) + 'M'; if (n >= 1e3) return '$' + Math.round(n).toLocaleString('en-US'); return '$' + n; }
 async function libMap() { const c = load(); if (c.services.plex?.url && c.services.plex?.token) { try { return await plex.libraryMap(); } catch { return {}; } } return {}; }
@@ -93,6 +119,7 @@ async function imdbIdFor(media, id) { return cached(`imdbid:${media}:${id}`, 30 
   router.post('/imdb-ratings', async (req, res) => {
     const items = (req.body && req.body.items) || [];
     const out = {};
+    const urls = {};
     const limited = items.slice(0, 50);
     for (let i = 0; i < limited.length; i += 5) {
       const chunk = limited.slice(i, i + 5);
@@ -103,12 +130,13 @@ async function imdbIdFor(media, id) { return cached(`imdbid:${media}:${id}`, 30 
         try {
           const imdbId = await imdbIdFor(media, id);
           if (!imdbId) return;
+          urls[String(id)] = "https://www.imdb.com/title/" + imdbId + "/";
           const o = await omdb.byImdbId(imdbId, media);
           if (o?.rating) out[String(id)] = o.rating;
         } catch {}
       }));
     }
-    res.json({ ratings: out });
+    res.json({ ratings: out, urls });
   });
 
 // batch media status (inLibrary ✓ vs requested ⏳)
@@ -201,10 +229,20 @@ router.get('/ai-suggest', async (req, res) => {
       const weight = new Map(); const typeOf = new Map();
       for (const h of hist) { const k = (h.grandparentTitle || h.title || '').toLowerCase().trim(); if (!k) continue; weight.set(k, (weight.get(k) || 0) + 1); typeOf.set(k, h.type); }
       const top = [...weight.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
-      const seeds = []; for (const [k] of top) { const s = await resolveSeed(k, typeOf.get(k)); if (s) seeds.push(s); }
+      // Resolve every seed title concurrently (was one serial TMDB search each).
+      const seeds = (await mapLimit(top, FANOUT, ([k]) => resolveSeed(k, typeOf.get(k)))).filter(Boolean);
       const allowedLangs = new Set(['en']); if (!T.englishOnly) for (const s of seeds) if (s.lang) allowedLangs.add(s.lang);
-      const owned = await ownedSet(); const pool = new Map();
-      for (const s of seeds) { for (const fn of ['recommendations', 'similar']) { try { const r = await tmdb[fn](s.media, s.id); for (const c of r.results || []) { const id = `${s.media}:${c.id}`; if (owned.has(s.media + ':' + String(c.id))) continue; if ((c.vote_average || 0) < T.minRating) continue; if ((c.vote_count || 0) < T.minVotes) continue; if (c.original_language && !allowedLangs.has(c.original_language)) continue; if (!c.poster_path) continue; if (!pool.has(id)) pool.set(id, { ...c, media: s.media }); } } catch { /* skip */ } } }
+      // Library scan and the per-seed fan-out are independent — overlap them.
+      const [owned, feeds] = await Promise.all([
+        ownedSet(),
+        mapLimit(seeds, FANOUT, async (s) => {
+          const settled = await Promise.allSettled([tmdb.recommendations(s.media, s.id), tmdb.similar(s.media, s.id)]);
+          // Same order as the old ['recommendations','similar'] loop.
+          return { s, lists: settled.map((r) => (r.status === 'fulfilled' ? (r.value.results || []) : [])) };
+        })
+      ]);
+      const pool = new Map();
+      for (const { s, lists } of feeds) { for (const list of lists) { for (const c of list) { const id = `${s.media}:${c.id}`; if (owned.has(s.media + ':' + String(c.id))) continue; if ((c.vote_average || 0) < T.minRating) continue; if ((c.vote_count || 0) < T.minVotes) continue; if (c.original_language && !allowedLangs.has(c.original_language)) continue; if (!c.poster_path) continue; if (!pool.has(id)) pool.set(id, { ...c, media: s.media }); } } }
       let candidates = [...pool.values()].sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0)).slice(0, T.maxCandidates);
       if (aiOn) { try { candidates = await aiRerank(candidates, seeds); } catch { /* keep */ } }
       return { source: aiOn ? 'ai' : 'rules', days: T.historyDays, basedOn: seeds.slice(0, 6).map((s) => cap(s.title)), items: candidates.slice(0, 24).map((c) => ({ ...mini(c), why: c._why })) };
@@ -213,12 +251,12 @@ router.get('/ai-suggest', async (req, res) => {
   } catch (e) { res.status(200).json({ error: e.message, items: [], aiConfigured: aiOn }); }
 });
 
-router.get('/live/now', async (req, res) => { const c = load(); if (!c.services.tautulli?.url || !c.services.tautulli?.apikey) return res.status(200).json({ error: 'Tautulli not configured', sessions: [] }); try { const data = await tautulli.activity(); for (const s of data.sessions) { const m = await posterFor(s.grandparent || s.title, s.year, s.type === 'episode' ? 'tv' : (s.type || 'multi')); s.poster = m?.poster || null; s.tmdbId = m?.id || null; } res.json(data); } catch (e) { res.status(200).json({ error: e.message, sessions: [] }); } });
-router.get('/live/stats', async (req, res) => { const c = load(); if (!c.services.tautulli?.url || !c.services.tautulli?.apikey) return res.status(200).json({ error: 'Tautulli not configured' }); const days = [30, 60, 90, 365].includes(Number(req.query.days)) ? Number(req.query.days) : 30; try { const data = await cached(`live:stats:${days}`, TTL_HOUR, async () => { const st = await tautulli.homeStats(days, 10); const enrich = async (rows, media) => { for (const r of (rows || [])) { const m = await posterFor(r.name, r.year, media); r.poster = m?.poster || null; r.id = m?.id || null; r.media = m?.media || media; } return rows; }; await Promise.all([enrich(st.topMovies, 'movie'), enrich(st.topTv, 'tv')]); return st; }, isForce(req)); res.json(data); } catch (e) { res.status(200).json({ error: e.message }); } });
+router.get('/live/now', async (req, res) => { const c = load(); if (!c.services.tautulli?.url || !c.services.tautulli?.apikey) return res.status(200).json({ error: 'Tautulli not configured', sessions: [] }); try { const data = await tautulli.activity(); await mapLimit(data.sessions, FANOUT, async (s) => { const m = await posterFor(s.grandparent || s.title, s.year, s.type === 'episode' ? 'tv' : (s.type || 'multi')); s.poster = m?.poster || null; s.tmdbId = m?.id || null; }); res.json(data); } catch (e) { res.status(200).json({ error: e.message, sessions: [] }); } });
+router.get('/live/stats', async (req, res) => { const c = load(); if (!c.services.tautulli?.url || !c.services.tautulli?.apikey) return res.status(200).json({ error: 'Tautulli not configured' }); const days = [30, 60, 90, 365].includes(Number(req.query.days)) ? Number(req.query.days) : 30; try { const data = await cached(`live:stats:${days}`, TTL_HOUR, async () => { const st = await tautulli.homeStats(days, 10); const enrich = async (rows, media) => { await mapLimit(rows || [], FANOUT, async (r) => { const m = await posterFor(r.name, r.year, media); r.poster = m?.poster || null; r.id = m?.id || null; r.media = m?.media || media; }); return rows; }; await Promise.all([enrich(st.topMovies, 'movie'), enrich(st.topTv, 'tv')]); return st; }, isForce(req)); res.json(data); } catch (e) { res.status(200).json({ error: e.message }); } });
 
 router.get('/new', async (req, res) => { const media = req.query.media === 'tv' ? 'tv' : 'movie'; try { const data = await cached(`new:${media}`, TTL_DAY, async () => { const settled = await Promise.allSettled(tmdb.STREAMING.map((s) => tmdb.newlyAdded(s.key, media, 20))); const rows = []; settled.forEach((r, i) => { if (r.status === 'fulfilled' && r.value.items.length) rows.push({ title: `New on ${r.value.provider}`, kind: media, brand: tmdb.STREAMING[i].key, items: r.value.items.map(mini) }); }); return { rows }; }, isForce(req)); res.json(data); } catch (e) { res.status(200).json({ error: e.message, rows: [] }); } });
 
-async function withWorldwide(items) { const out = []; for (const it of items) { let ww = null; if (it.id) { try { const b = await tmdb.movieBrief(it.id); if (b && b.revenue) ww = b.revenue; } catch { /* ignore */ } } out.push({ ...it, total: fmtMoney(ww) || it.total || null, totalKind: ww ? 'worldwide' : (it.totalKind || 'domestic') }); } return out; }
+async function withWorldwide(items) { return mapLimit(items, FANOUT, async (it) => { let ww = null; if (it.id) { try { const b = await tmdb.movieBrief(it.id); if (b && b.revenue) ww = b.revenue; } catch { /* ignore */ } } return { ...it, total: fmtMoney(ww) || it.total || null, totalKind: ww ? 'worldwide' : (it.totalKind || 'domestic') }; }); }
 router.get('/boxoffice', async (req, res) => {
   const source = load().boxoffice?.source || 'bom'; const areaKey = load().boxoffice?.area || 'US';
   try { if (source === 'bom') { const data = await cached(`boxoffice:bom:${areaKey}:${mondayKey()}`, 7 * TTL_DAY, async () => { const bo = await boxoffice.topWeekend(); return { source: bo.source, region: bo.region, weekOf: bo.weekLabel || mondayKey(), note: 'Real weekend grosses (Box Office Mojo) · worldwide totals from TMDB.', items: bo.items.map((it) => ({ rank: it.rank, id: it.id, media: 'movie', title: it.title, year: it.year, overview: it.overview, poster: it.poster, backdrop: it.backdrop, rating: it.rating, weekend: it.weekendGrossText, total: it.worldwideTotalText || it.domesticTotalText, totalKind: it.worldwideTotalText ? 'worldwide' : 'domestic', weeks: it.weeks })) }; }, isForce(req)); if (data.items && data.items.length) return res.json(data); } } catch (e) { console.warn('[boxoffice] BOM failed, proxy:', e.message); }

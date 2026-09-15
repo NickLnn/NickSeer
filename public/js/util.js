@@ -23,13 +23,63 @@ export function el(tag, attrs = {}, children = []) {
 
 export function authToken() { return localStorage.getItem('nickseer_token') || ''; }
 
+// ---------------------------------------------------------------------------
+// Client API cache
+// ---------------------------------------------------------------------------
+// This used to be a bare in-memory Map, so every reload — and every PWA
+// relaunch — refetched rows the server had already cached for 24h. It is now
+// mirrored into sessionStorage so a return visit paints from cache instantly.
+//
+// The key is `path + ':' + authToken()`, which is why this is safe where a
+// Service Worker cache was NOT: the Cache API ignores the Authorization header
+// when matching, so SW-caching /api reads served profile A's rows to profile B.
+// Keying on the token keeps profiles separate, and sessionStorage is per-tab
+// and cleared when the browser session ends.
+const CACHE_TTL_MS = 300000; // 5 minutes
+const STORE_KEY = 'ns_api_cache_v1';
 const clientApiCache = new Map();
 
+function persist() {
+  try {
+    const now = Date.now();
+    const live = [];
+    for (const [k, v] of clientApiCache) {
+      if (now - v.time < CACHE_TTL_MS) live.push([k, v]);
+    }
+    sessionStorage.setItem(STORE_KEY, JSON.stringify(live));
+  } catch { /* quota, private mode, or storage disabled — stays in memory */ }
+}
+
+function hydrate() {
+  try {
+    const raw = sessionStorage.getItem(STORE_KEY);
+    if (!raw) return;
+    const now = Date.now();
+    for (const [k, v] of JSON.parse(raw)) {
+      if (v && typeof v.time === 'number' && now - v.time < CACHE_TTL_MS) clientApiCache.set(k, v);
+    }
+  } catch { /* corrupt or unreadable — start empty */ }
+}
+hydrate();
+
+// Serialising the whole cache on every response would be wasteful, so coalesce
+// into one write per tick.
+let persistTimer = null;
+function schedulePersist() {
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => { persistTimer = null; persist(); }, 250);
+}
+
 export function clearApiCache(prefix) {
-  if (!prefix) { clientApiCache.clear(); return; }
+  if (!prefix) {
+    clientApiCache.clear();
+    try { sessionStorage.removeItem(STORE_KEY); } catch { /* ignore */ }
+    return;
+  }
   for (const k of clientApiCache.keys()) {
     if (k.startsWith(prefix)) clientApiCache.delete(k);
   }
+  schedulePersist();
 }
 
 export async function api(path, opts = {}) {
@@ -39,8 +89,7 @@ export async function api(path, opts = {}) {
 
   if (method === 'GET' && !isForce && clientApiCache.has(cacheKey)) {
     const entry = clientApiCache.get(cacheKey);
-    // 5-minute memory cache
-    if (Date.now() - entry.time < 300000) {
+    if (Date.now() - entry.time < CACHE_TTL_MS) {
       return entry.data;
     }
   }
@@ -55,6 +104,7 @@ export async function api(path, opts = {}) {
 
   if (method === 'GET' && !isForce && data && !data.error) {
     clientApiCache.set(cacheKey, { data, time: Date.now() });
+    schedulePersist();
   }
   return data;
 }
@@ -74,7 +124,7 @@ export function hasCache(path) {
   const cacheKey = path + ':' + authToken();
   if (clientApiCache.has(cacheKey)) {
     const entry = clientApiCache.get(cacheKey);
-    if (Date.now() - entry.time < 300000) return true;
+    if (Date.now() - entry.time < CACHE_TTL_MS) return true;
   }
   return false;
 }

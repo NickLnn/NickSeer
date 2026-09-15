@@ -31,6 +31,12 @@ const DEFAULTS = {
   auth: { enabled: false, secret: '', users: [], approvals: false },
   // "Sign in with Plex" support (OAuth PIN flow).
   plexAuth: { enabled: false, clientId: '' },
+  // Shared secret for the Overseerr-compatible /api/v1 surface (Requestrr et al).
+  // Auto-generated on first boot; sent by clients as the X-Api-Key header.
+  api: { key: '' },
+  // Shared secret for POST /api/v1/webhook (Radarr/Sonarr "on import").
+  // Auto-generated on first boot; sent as the ?token= query parameter.
+  webhook: { secret: '' },
   // Pending/approved request queue (for the Approvals tab).
   requests: [],
   users: [],
@@ -84,8 +90,15 @@ function deepMerge(base, override) {
 
 let cache = null;
 let lastMtime = 0;
+// The auth guard calls load() on every request, and verifyToken() calls it
+// again via ensureSecret(). Statting the config file twice per request on a
+// NAS-backed volume is measurable, so serve the in-memory copy for a beat.
+let lastStatAt = 0;
+const STAT_THROTTLE_MS = 1000;
 
 export function load(forceReload = false) {
+  if (!forceReload && cache && Date.now() - lastStatAt < STAT_THROTTLE_MS) return cache;
+  lastStatAt = Date.now();
   try {
     if (!fs.existsSync(CONFIG_DIR)) fs.mkdirSync(CONFIG_DIR, { recursive: true });
     if (fs.existsSync(CONFIG_FILE)) {
@@ -141,6 +154,23 @@ export function setRequests(arr) {
   return save(c);
 }
 
+// Apply a mutation to the CURRENT on-disk requests array.
+//
+// Callers that hold an array across an await (notably the approve path, which
+// awaits a Radarr/Sonarr add that can take seconds) were writing back a stale
+// snapshot, silently discarding any request submitted during that window.
+// The read, the mutation and the write here are synchronous, so nothing can
+// interleave. The callback receives the fresh array and may mutate it in place
+// or return a replacement.
+export function mutateRequests(fn) {
+  const c = load();
+  const arr = Array.isArray(c.requests) ? c.requests : [];
+  const next = fn(arr) || arr;
+  c.requests = next;
+  save(c);
+  return next;
+}
+
 export function redacted() {
   const c = JSON.parse(JSON.stringify(load()));
   const mask = (v) => (v ? '••••••••' + String(v).slice(-4) : '');
@@ -155,6 +185,8 @@ export function redacted() {
   c.omdb.apiKey = mask(c.omdb.apiKey); c.ai.openaiApiKey = mask(c.ai.openaiApiKey);
   if (c.telegram?.botToken) c.telegram.botToken = mask(c.telegram.botToken);
   if (c.discord?.webhookUrl) c.discord.webhookUrl = mask(c.discord.webhookUrl);
+  if (c.api?.key) c.api.key = mask(c.api.key);
+  if (c.webhook?.secret) c.webhook.secret = mask(c.webhook.secret);
   if (c.auth) { c.auth.secret = ''; c.auth.users = (c.auth.users || []).map((u) => ({ username: u.username, role: u.role || 'user', plex: !!u.plexId, thumb: u.thumb || '' })); }
   delete c.requests; // large; fetched via its own endpoint
   return c;

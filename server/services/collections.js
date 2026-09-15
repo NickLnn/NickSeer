@@ -108,6 +108,45 @@ async function fetchTmdbCollection(id) {
   return res.json();
 }
 
+export function formatRevenue(n) {
+  if (n == null || isNaN(n) || n <= 0) return null;
+  if (n >= 1e9) {
+    const b = n / 1e9;
+    return '$' + (b >= 10 ? b.toFixed(1) : b.toFixed(2)) + 'B';
+  }
+  if (n >= 1e6) {
+    const m = n / 1e6;
+    return '$' + (m >= 10 ? m.toFixed(1) : m.toFixed(2)) + 'M';
+  }
+  if (n >= 1e3) {
+    return '$' + Math.round(n).toLocaleString('en-US');
+  }
+  return '$' + n;
+}
+
+export function formatFullCurrency(n) {
+  if (n == null || isNaN(n) || n <= 0) return null;
+  return '$' + Math.round(n).toLocaleString('en-US');
+}
+
+async function getMovieFinancials(movieId) {
+  return cached(`movie:financials:${movieId}`, TTL_DAY * 7, async () => {
+    try {
+      const { apiKey } = tmdbBase();
+      if (!apiKey) return { revenue: 0, budget: 0 };
+      const res = await fetch(`https://api.themoviedb.org/3/movie/${movieId}?api_key=${apiKey}`);
+      if (!res.ok) return { revenue: 0, budget: 0 };
+      const data = await res.json();
+      return {
+        revenue: typeof data.revenue === 'number' && data.revenue > 0 ? data.revenue : 0,
+        budget: typeof data.budget === 'number' && data.budget > 0 ? data.budget : 0
+      };
+    } catch {
+      return { revenue: 0, budget: 0 };
+    }
+  });
+}
+
 function img(path, size = 'w500') {
   return path ? `https://image.tmdb.org/t/p/${size}${path}` : null;
 }
@@ -131,7 +170,17 @@ export async function getCollection(id) {
     return da.localeCompare(db);
   });
 
-  const parts = rawParts.map(p => {
+  const financials = await Promise.all(
+    rawParts.map(p => getMovieFinancials(p.id).catch(() => ({ revenue: 0, budget: 0 })))
+  );
+
+  let totalRevenue = 0;
+
+  const parts = rawParts.map((p, idx) => {
+    const fin = financials[idx] || { revenue: 0, budget: 0 };
+    const rev = typeof fin.revenue === 'number' ? fin.revenue : 0;
+    if (rev > 0) totalRevenue += rev;
+
     const inLibrary = Boolean(plex.isMediaInLibrary ? plex.isMediaInLibrary(libMap, {
       id: p.id,
       media: 'movie',
@@ -158,6 +207,8 @@ export async function getCollection(id) {
       backdrop: img(p.backdrop_path, 'original'),
       rating: p.vote_average ? Math.round(p.vote_average * 10) / 10 : null,
       voteCount: p.vote_count || 0,
+      revenue: rev,
+      formattedRevenue: formatRevenue(rev),
       inLibrary,
       isPending
     };
@@ -181,6 +232,9 @@ export async function getCollection(id) {
     pending,
     unrequested,
     completionPercent: total > 0 ? Math.round((owned / total) * 100) : 0,
+    totalRevenue,
+    formattedRevenue: formatRevenue(totalRevenue),
+    fullRevenue: formatFullCurrency(totalRevenue),
     parts
   };
 }

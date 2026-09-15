@@ -15,6 +15,7 @@ import tautulli from '../services/tautulli.js';
 import plex from '../services/plex.js';
 import auth from '../services/auth.js';
 import { load, setRequests } from '../config.js';
+import { allow, retryAfter } from '../lib/ratelimit.js';
 import * as telegram from '../services/telegram.js';
 import * as discord from '../services/discord.js';
 import crypto from 'crypto';
@@ -51,20 +52,37 @@ router.get('/options', async (req, res) => {
   res.json(out);
 });
 
+// Submissions drive real writes into Radarr/Sonarr and were previously
+// unlimited for any signed-in user. This is the web UI's endpoint only —
+// Requestrr posts to /api/v1/request, which is deliberately untouched.
+const REQ_MAX = 10;              // submissions...
+const REQ_WINDOW_MS = 60000;     // ...per minute, per user
+
 router.post('/', async (req, res) => {
   const { media, tmdbId, title, poster, qualityProfileId, rootFolder, tags = [], newTags = [], seasons } = req.body || {};
   if (!media || !tmdbId) return res.status(400).json({ ok: false, error: 'media and tmdbId required' });
+  const who = req.user?.username || req.user?.plexId || req.ip || 'anon';
+  if (!allow('request:' + who, REQ_MAX, REQ_WINDOW_MS)) {
+    const wait = retryAfter('request:' + who, REQ_MAX, REQ_WINDOW_MS);
+    console.warn('[ratelimit] request throttled for ' + who);
+    return res.status(429).json({ ok: false, rateLimited: true, error: 'Too many requests in a row. Try again in ' + wait + 's.' });
+  }
   const kind = kindFor(media);
   const c = load();
   const u = userFrom(req);
   const isAdmin = u && u.role === 'admin';
+
+  let fullPoster = poster || '';
+  if (fullPoster && !fullPoster.startsWith('http')) {
+    fullPoster = `https://image.tmdb.org/t/p/w500${fullPoster.startsWith('/') ? '' : '/'}${fullPoster}`;
+  }
 
   if (mustQueue(c, isAdmin)) {
     const all = load().requests || [];
     if (all.find((r) => r.status === 'pending' && String(r.tmdbId) === String(tmdbId) && r.media === media)) {
       return res.json({ ok: true, code: 'pending', already: true });
     }
-    const rq = { id: crypto.randomUUID(), status: 'pending', media, tmdbId, title: title || '', poster: poster || '', by: u ? u.username : 'guest', at: Date.now(), qualityProfileId: qualityProfileId || null, rootFolder: rootFolder || '', tags, newTags, seasons };
+    const rq = { id: crypto.randomUUID(), status: 'pending', media, tmdbId, title: title || '', poster: fullPoster, by: u ? u.username : 'guest', at: Date.now(), qualityProfileId: qualityProfileId || null, rootFolder: rootFolder || '', tags, newTags, seasons };
       all.unshift(rq);
       setRequests(all);
       telegram.notify('pending', rq); discord.notify('pending', rq);
@@ -76,11 +94,11 @@ router.post('/', async (req, res) => {
     for (const label of newTags) { if (!label) continue; const id = await arr.ensureTag(kind, label); if (!tagIds.includes(id)) tagIds.push(id); }
     const result = await arr.add(kind, tmdbId, { qualityProfileId: qualityProfileId ? Number(qualityProfileId) : undefined, rootFolder: rootFolder || undefined, tags: tagIds, seasons });
     try { plex.invalidateLibrary(); } catch { /* ignore */ }
-      telegram.notify('autoApproved', { title, media, tmdbId, poster, by: u ? u.username : 'guest' }); discord.notify('autoApproved', { title, media, tmdbId, poster, by: u ? u.username : 'guest' });
+      telegram.notify('autoApproved', { title, media, tmdbId, poster: fullPoster, by: u ? u.username : 'guest' }); discord.notify('autoApproved', { title, media, tmdbId, poster: fullPoster, by: u ? u.username : 'guest' });
       res.json({ ok: true, kind, id: result.id, title: result.title || result.movie?.title });
   } catch (e) {
-    if (isAlreadyExists(e.message)) { telegram.notify('available', { title, media, tmdbId, poster, by: u ? u.username : 'guest' }); discord.notify('available', { title, media, tmdbId, poster, by: u ? u.username : 'guest' }); return res.status(200).json({ ok: false, code: 'exists', kind, error: `Already added to ${cap(kind)}.` }); }
-      telegram.notify('failed', { title, media, tmdbId, poster, by: u ? u.username : 'guest' }); discord.notify('failed', { title, media, tmdbId, poster, by: u ? u.username : 'guest' });
+    if (isAlreadyExists(e.message)) { telegram.notify('available', { title, media, tmdbId, poster: fullPoster, by: u ? u.username : 'guest' }); discord.notify('available', { title, media, tmdbId, poster: fullPoster, by: u ? u.username : 'guest' }); return res.status(200).json({ ok: false, code: 'exists', kind, error: `Already added to ${cap(kind)}.` }); }
+      telegram.notify('failed', { title, media, tmdbId, poster: fullPoster, by: u ? u.username : 'guest' }); discord.notify('failed', { title, media, tmdbId, poster: fullPoster, by: u ? u.username : 'guest' });
       res.status(200).json({ ok: false, error: e.message });
   }
 });

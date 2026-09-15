@@ -1,4 +1,8 @@
 import { escHTML } from './util.js';
+// Overlay teardown is centralised in app.js: closing #modal by hand here left
+// the modal card populated (a YouTube iframe kept playing) and, now that the
+// body scroll lock exists, would have left the page frozen.
+import { closeAllOverlays, applyScrollLock } from './overlay.js';
 // aisuggest.js — dedicated "AI Suggestions" tab. Subtitle now reflects the REAL
 // history window returned by the API (fixes the hardcoded "30 days"). Cards use
 // the standard .card markup so imdb-badge.js adds IMDb ratings here too.
@@ -44,8 +48,9 @@ async function openDetail(item) {
   const modal = document.getElementById('modal'); const cardEl = document.getElementById('modalCard');
   if (!modal || !cardEl) return;
   modal.classList.remove('hidden');
+  applyScrollLock();
   cardEl.innerHTML = '<div style="padding:60px;text-align:center;color:#9aa0ad">Loading…</div>';
-  const bk = document.getElementById('modalBackdrop'); if (bk) bk.onclick = () => modal.classList.add('hidden');
+  const bk = document.getElementById('modalBackdrop'); if (bk) bk.onclick = closeAllOverlays;
   const media = item.media === 'show' ? 'tv' : (item.media || 'movie');
   const d = await api(`/api/discover/${media}/${item.id}`);
   if (d.error) { cardEl.innerHTML = `<div style="padding:40px">${escHTML(d.error)}</div>`; return; }
@@ -64,13 +69,15 @@ async function openDetail(item) {
   }
   if (media === 'tv' && d.seriesStatus) ownBadgesHtml += '<span class="own-pill ' + (d.seriesStatus === 'ended' ? 'ended' : 'cont') + '">' + (d.seriesStatus === 'ended' ? '■ Ended' : '● Continuing') + '</span>';
   
-  cardEl.innerHTML = `<button class="modal-close" data-nav onclick="document.getElementById('modal').classList.add('hidden')">✕</button>${hero}<div class="modal-body">
+  cardEl.innerHTML = `<button class="modal-close" data-nav id="aisModalClose">✕</button>${hero}<div class="modal-body">
     <div class="title-row"><h2 class="modal-title">${d.title || ''}</h2><div class="own-badges">${ownBadgesHtml}</div></div>${d.tagline ? `<div class="modal-tagline">${d.tagline}</div>` : ''}
     <div class="modal-meta">${d.year ? `<span>${d.year}</span>` : ''}${d.rating ? `<span style="color:var(--gold)">★ ${d.rating.toFixed(1)}</span>` : ''}<span class="chip">${media === 'tv' ? 'TV' : 'Movie'}</span>${(d.genres || []).slice(0, 3).map((g) => `<span class="chip">${g}</span>`).join('')}${imdbBadge}</div>
     ${item.why ? `<div class="why-chip" style="position:static;display:inline-block;margin-bottom:12px">✨ ${item.why}</div>` : ''}
     <p class="modal-overview">${d.overview || 'No description available.'}</p>
     <div class="modal-actions"><button class="btn btn-accent" id="aisReq">＋  Request</button>${ytBtn}${imdbBtn}</div></div>`;
   
+  cardEl.querySelector('#aisModalClose')?.addEventListener('click', closeAllOverlays);
+
   if (d.streamingService && window.renderStreamPill) {
     const ob = cardEl.querySelector('.own-badges');
     const sp = window.renderStreamPill(d.streamingService);

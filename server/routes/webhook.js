@@ -1,4 +1,5 @@
 import express from '../mini.js';
+import crypto from 'crypto';
 import { load, setRequests } from '../config.js';
 import tmdb from '../services/tmdb.js';
 import * as telegram from '../services/telegram.js';
@@ -7,6 +8,19 @@ import * as discord from '../services/discord.js';
 const router = express.Router();
 
 router.post('/', async (req, res) => {
+  // Shared secret. This endpoint flips a queued request to "available" and
+  // fires Telegram/Discord notifications, so it must not be open to anyone
+  // who can reach the hostname. Radarr and Sonarr both support a query
+  // string on the webhook URL: .../api/v1/webhook?token=<secret>
+  const secret = load().webhook?.secret || '';
+  if (!secret) return res.status(503).json({ error: 'webhook secret not configured' });
+  const supplied = String(req.query?.token || req.headers['x-webhook-token'] || '');
+  const a = Buffer.from(supplied);
+  const b = Buffer.from(secret);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+
   try {
     const payload = req.body;
     if (!payload || !payload.eventType) {

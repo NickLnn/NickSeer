@@ -318,7 +318,12 @@ async function toggleTab() {
 function init() {
   toggleTab();
   const btn = document.querySelector('.nav-link[data-view="info"]');
-  if (btn) btn.addEventListener('click', () => { currentSubTab = 'host'; setTimeout(render, 0); });
+  // Render only once showView() has settled and the admin gate has passed.
+  // Rendering directly off the click fired before that async check resolved,
+  // so a non-admin saw the admin-only panel painted behind the redirect.
+  document.addEventListener('view:changed', (e) => {
+    if (e.detail && e.detail.view === 'info' && isInfoActive()) { currentSubTab = 'host'; render(); }
+  });
   const obs = new MutationObserver(() => {
     if (isInfoActive() && !document.getElementById('infoView')) {
       render();

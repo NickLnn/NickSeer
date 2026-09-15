@@ -6,20 +6,25 @@
 // see on each card comes from TMDB revenue, and it refreshes whenever the weekly
 // scheduler re-fetches (7-day cache).
 import { load } from '../config.js';
+import { mapLimit } from '../lib/async.js';
 import tmdb from './tmdb.js';
 
 const BOM = 'https://www.boxofficemojo.com';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
 async function fetchHtml(url) {
-  const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'text/html' }, redirect: 'follow' });
+  const res = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'text/html' }, redirect: 'follow', signal: AbortSignal.timeout(10000) });
   if (!res.ok) throw new Error(`boxofficemojo ${res.status}`);
   return res.text();
 }
 
 function weekendUrl(area) {
   const q = area ? `?area=${encodeURIComponent(area)}` : '';
-  return `${BOM}/weekend/${q}`;
+  // /weekend/ is the INDEX of every weekend in the year ("Domestic Box Office
+  // Weekends For 2026") and carries no per-film rows, so parsing it always
+  // yielded zero results. /weekend/chart/ redirects to the current weekend
+  // (e.g. /weekend/2026W36/), which is the actual chart.
+  return `${BOM}/weekend/chart/${q}`;
 }
 
 export function parseWeekend(html) {
@@ -37,15 +42,20 @@ export function parseWeekend(html) {
   const rows = scope.match(/<tr[\s\S]*?<\/tr>/gi) || [];
   const out = [];
   for (const row of rows) {
-    if (!/mojo-field-type-release_group/.test(row)) continue;
+    // BOM renamed this column class from `release_group` to `release`, so the
+    // old test matched zero rows and the scraper silently returned nothing.
+    // The negative lookahead keeps it from also matching `release_studios`
+    // (the distributor column). Both spellings are accepted so the parser
+    // survives if BOM reverts.
+    if (!/mojo-field-type-release(?:_group)?(?![_a-z])/.test(row)) continue;
     let rank = null;
     const rankHdr = row.match(/mojo-header-column[^>]*mojo-field-type-rank[^>]*>\s*([\d,]+)/i)
       || row.match(/mojo-field-type-rank[^>]*mojo-header-column[^>]*>\s*([\d,]+)/i)
       || row.match(/mojo-field-type-rank[^>]*>\s*([\d,]+)/i);
     if (rankHdr) rank = Number(rankHdr[1].replace(/,/g, ''));
 
-    const titleM = row.match(/mojo-field-type-release_group[^>]*>\s*<a[^>]*>([^<]+)<\/a>/i)
-      || row.match(/mojo-field-type-release_group[^>]*>\s*([^<]+)</i);
+    const titleM = row.match(/mojo-field-type-release(?:_group)?(?![_a-z])[^>]*>\s*<a[^>]*>([^<]+)<\/a>/i)
+      || row.match(/mojo-field-type-release(?:_group)?(?![_a-z])[^>]*>\s*([^<]+)</i);
     const title = titleM ? decodeEntities(titleM[1].trim()) : null;
     if (!title) continue;
 
@@ -53,8 +63,17 @@ export function parseWeekend(html) {
     const weekendGross = money.length ? money[0] : null;
     const domesticTotal = money.length ? money[money.length - 1] : null;
 
+    // There is no `weeks` class in the current markup. Column order is
+    //   Rank | LW | Release | Gross | %± | Theaters | Change | Average | Total | Weeks | Distributor
+    // so Weeks is the LAST positive_integer cell in the row. The old classes
+    // are still tried first in case BOM reinstates them.
     const weeksM = row.match(/mojo-field-type-weeks[^>]*>\s*([\d,]+)/i) || row.match(/mojo-field-type-running[^>]*>\s*([\d,]+)/i);
-    const weeks = weeksM ? Number(weeksM[1].replace(/,/g, '')) : null;
+    let weeks = weeksM ? Number(weeksM[1].replace(/,/g, '')) : null;
+    if (weeks === null) {
+      const ints = [...row.matchAll(/mojo-field-type-positive_integer[^>]*>\s*([\d,]+)/gi)]
+        .map((m) => Number(m[1].replace(/,/g, '')));
+      if (ints.length) weeks = ints[ints.length - 1];
+    }
 
     out.push({ rank: rank ?? out.length + 1, title, weekendGross, domesticTotal, weeks });
     if (out.length >= 10) break;
@@ -103,14 +122,15 @@ export async function topWeekend() {
   const { label, items } = parseWeekend(html);
   if (!items.length) throw new Error('Box Office Mojo returned no rows');
 
-  const enriched = [];
-  for (const it of items) {
+  // One TMDB match + one revenue lookup per row. Serially this was ~20 round
+  // trips back-to-back; mapLimit preserves row order so ranking is unchanged.
+  const enriched = await mapLimit(items, 8, async (it) => {
     const m = await matchToTmdb(it.title);
     let worldwide = null;
     if (m?.id) {
       try { const brief = await tmdb.movieBrief(m.id); if (brief && brief.revenue) worldwide = brief.revenue; } catch { /* ignore */ }
     }
-    enriched.push({
+    return ({
       rank: it.rank,
       bomTitle: it.title,
       weekendGross: it.weekendGross,
@@ -125,7 +145,7 @@ export async function topWeekend() {
       poster: m?.poster || null, backdrop: m?.backdrop || null, rating: m?.rating || null,
       matched: !!m
     });
-  }
+  });
   return { source: 'box-office-mojo', region: area || 'US & Canada', weekLabel: label, items: enriched };
 }
 

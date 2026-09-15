@@ -14,7 +14,7 @@ async function cmd(command, params = {}) {
   url.searchParams.set('apikey', key);
   url.searchParams.set('cmd', command);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
   if (!res.ok) throw new Error(`tautulli ${res.status}: ${await res.text()}`);
   const json = await res.json();
   if (json?.response?.result !== 'success') throw new Error('tautulli: ' + (json?.response?.message || 'error'));

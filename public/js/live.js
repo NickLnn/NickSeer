@@ -132,7 +132,10 @@ async function toggleTab() {
 function init() {
   toggleTab();
   const btn = document.querySelector('.nav-link[data-view="live"]');
-  if (btn) btn.addEventListener('click', () => { sub = 'now'; setTimeout(render, 0); });
+  // See info.js: wait for showView() to settle so the admin gate is honoured.
+  document.addEventListener('view:changed', (e) => {
+    if (e.detail && e.detail.view === 'live' && isLiveActive()) { sub = 'now'; render(); }
+  });
   const obs = new MutationObserver(() => { if (isLiveActive() && !document.getElementById('liveView')) render(); });
   obs.observe(app() || document.body, { childList: true, subtree: true });
 }

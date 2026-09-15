@@ -153,7 +153,7 @@ html, body {
 /* ==========================================================================
    📱 SEERR-STYLE MOBILE NAVIGATION DRAWER
    ========================================================================== */
-.drawer-overlay { position: fixed; inset: 0; z-index: 140; display: flex; }
+.drawer-overlay { position: fixed; inset: 0; z-index: var(--z-drawer); display: flex; }
 .drawer-overlay.hidden { display: none; }
 .drawer-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.75); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
 .drawer-panel { position: relative; width: min(320px, 84vw); height: 100%; background: #111118; border-right: 1px solid rgba(255,255,255,.1); display: flex; flex-direction: column; z-index: 2; box-shadow: 10px 0 40px rgba(0,0,0,.8); animation: drawerSlideIn .22s cubic-bezier(0.16, 1, 0.3, 1); }
@@ -271,7 +271,7 @@ html, body {
 .login-overlay {
   position: fixed;
   inset: 0;
-  z-index: 150;
+  z-index: var(--z-login);
   display: grid;
   place-items: center;
   background: radial-gradient(1200px 700px at 50% -10%, rgba(46,155,214,.2), transparent), #060911;
@@ -1263,6 +1263,99 @@ html, body {
   border-radius: 10px;
 }
 
+/* ==========================================================================
+   💰 COLLECTION BOX OFFICE REVENUE PILL (REVOLUT-INSPIRED GLASSMORPHISM)
+   ========================================================================== */
+.col-modal-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.col-revenue-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6.5px;
+  background: rgba(14, 25, 20, 0.84);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(53, 208, 127, 0.38);
+  color: #7ef0b0;
+  padding: 8px 14px;
+  border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: default;
+  user-select: none;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.col-revenue-pill:hover {
+  background: rgba(18, 34, 26, 0.94);
+  border-color: rgba(53, 208, 127, 0.65);
+  box-shadow: 0 6px 18px rgba(53, 208, 127, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  transform: translateY(-1px);
+}
+
+.col-revenue-pill .col-rev-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #35d07f;
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 6px rgba(53, 208, 127, 0.45));
+}
+
+.col-revenue-pill .col-rev-icon svg {
+  display: block;
+}
+
+.col-revenue-pill .col-rev-label {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #8da0b8;
+  margin-right: 1px;
+}
+
+.col-revenue-pill .col-rev-val {
+  font-size: 13.5px;
+  font-weight: 900;
+  color: #7ef0b0;
+  letter-spacing: -0.02em;
+  font-feature-settings: "tnum";
+}
+
+.col-part-rev {
+  color: #7ef0b0;
+  font-weight: 700;
+  font-size: 11.5px;
+  letter-spacing: -0.01em;
+}
+
+@media (max-width: 768px) {
+  .col-modal-actions {
+    gap: 8px;
+  }
+  .col-revenue-pill {
+    padding: 7px 11px;
+    font-size: 12px;
+    gap: 5px;
+  }
+  .col-revenue-pill .col-rev-label {
+    font-size: 10px;
+  }
+  .col-revenue-pill .col-rev-val {
+    font-size: 12px;
+  }
+}
+
+
 .col-modal-body {
   padding: 20px 24px 30px;
 }
@@ -1761,7 +1854,7 @@ body {
 .req-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: var(--z-request);
   display: flex !important;
   align-items: center;
   justify-content: center;
@@ -1891,11 +1984,19 @@ body {
 }
 
 /* ==========================================================================
-   📱 SLEEK APPLE/NETFLIX-STYLE BOTTOM NAVIGATION (NO CHILDISH EMOJIS)
+   📱 REVOLUT-INSPIRED PREMIUM MOBILE PWA DOCK & BOTTOM NAVIGATION
    ========================================================================== */
+/* Desktop Browser Isolation: ensure bottom nav is completely hidden on desktop */
+@media (min-width: 769px) {
+  .bottom-nav {
+    display: none !important;
+  }
+}
+
+/* Mobile & PWA Native Navigation Dock */
 @media (max-width: 768px) {
   main, .app-main, .main-content {
-    padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px)) !important;
+    padding-bottom: calc(78px + env(safe-area-inset-bottom, 0px)) !important;
   }
 
   .bottom-nav {
@@ -1904,16 +2005,18 @@ body {
     bottom: 0 !important;
     left: 0 !important;
     right: 0 !important;
-    height: calc(60px + env(safe-area-inset-bottom, 0px)) !important;
-    background: rgba(10, 14, 23, 0.92) !important;
-    backdrop-filter: blur(24px) !important;
-    -webkit-backdrop-filter: blur(24px) !important;
+    height: calc(62px + env(safe-area-inset-bottom, 0px)) !important;
+    background: rgba(8, 12, 20, 0.86) !important;
+    backdrop-filter: blur(28px) saturate(190%) !important;
+    -webkit-backdrop-filter: blur(28px) saturate(190%) !important;
     border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
-    z-index: 900 !important;
+    z-index: var(--z-bottom-nav) !important;
     align-items: center !important;
     justify-content: space-around !important;
-    padding: 0 6px env(safe-area-inset-bottom, 0px) !important;
-    box-shadow: 0 -4px 25px rgba(0, 0, 0, 0.6) !important;
+    padding: 0 8px env(safe-area-inset-bottom, 0px) !important;
+    box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+    user-select: none !important;
+    -webkit-user-select: none !important;
   }
 
   .bottom-nav-item {
@@ -1922,14 +2025,22 @@ body {
     flex-direction: column !important;
     align-items: center !important;
     justify-content: center !important;
-    gap: 4px !important;
-    color: #8a92a6 !important;
+    gap: 3px !important;
+    color: #94a3b8 !important;
     background: transparent !important;
     border: none !important;
     padding: 6px 4px !important;
     cursor: pointer !important;
-    transition: color 0.2s ease, transform 0.15s ease !important;
+    border-radius: 14px !important;
+    transition: color 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.2s ease !important;
     -webkit-tap-highlight-color: transparent !important;
+    touch-action: manipulation !important;
+  }
+
+  /* Tactile micro-depression on press (Revolut haptic feel) */
+  .bottom-nav-item:active {
+    transform: scale(0.91) !important;
+    transition: transform 0.06s cubic-bezier(0.16, 1, 0.3, 1) !important;
   }
 
   .bottom-nav-item .bnav-icon {
@@ -1938,32 +2049,265 @@ body {
     justify-content: center !important;
     width: 24px !important;
     height: 24px !important;
+    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
   }
 
   .bottom-nav-item .bnav-icon svg {
-    stroke: #8a92a6 !important;
-    transition: stroke 0.2s ease, transform 0.2s ease !important;
+    stroke: #94a3b8 !important;
+    transition: stroke 0.2s ease, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.2s ease !important;
   }
 
   .bottom-nav-item .bnav-label {
-    font-size: 10.5px !important;
+    font-size: 10px !important;
     font-weight: 700 !important;
     letter-spacing: 0.02em !important;
-    transition: color 0.2s ease !important;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    transition: color 0.2s ease, font-weight 0.2s ease !important;
   }
 
+  /* Active State: subtle Aegean luminous pill with scale */
   .bottom-nav-item.active {
-    color: #2E9BD6 !important;
+    color: #38bdf8 !important;
+    background: rgba(56, 189, 248, 0.08) !important;
+  }
+
+  .bottom-nav-item.active .bnav-icon {
+    transform: translateY(-1px) !important;
   }
 
   .bottom-nav-item.active .bnav-icon svg {
-    stroke: #2E9BD6 !important;
-    transform: scale(1.1) !important;
+    stroke: #38bdf8 !important;
+    transform: scale(1.12) !important;
+    filter: drop-shadow(0 2px 8px rgba(56, 189, 248, 0.5)) !important;
   }
 
   .bottom-nav-item.active .bnav-label {
-    color: #2E9BD6 !important;
+    color: #38bdf8 !important;
     font-weight: 800 !important;
+  }
+
+  /* Revolut-style Mobile Bottom Sheet Presentation for Modals */
+  .modal {
+    align-items: flex-end !important;
+    padding: 0 !important;
+    background: rgba(0, 0, 0, 0.72) !important;
+    backdrop-filter: blur(16px) !important;
+    -webkit-backdrop-filter: blur(16px) !important;
+  }
+
+  .modal-card {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    max-height: 89vh !important;
+    border-radius: 28px 28px 0 0 !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-bottom: none !important;
+    background: rgba(13, 17, 26, 0.96) !important;
+    backdrop-filter: blur(28px) !important;
+    -webkit-backdrop-filter: blur(28px) !important;
+    box-shadow: 0 -14px 44px rgba(0, 0, 0, 0.85) !important;
+    padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px)) !important;
+    animation: revolutSheetSlideUp 0.32s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  }
+
+  /* Revolut Bottom Sheet Grab Bar Indicator */
+  .modal-card::before {
+    content: '' !important;
+    display: block !important;
+    width: 38px !important;
+    height: 4.5px !important;
+    background: rgba(255, 255, 255, 0.26) !important;
+    border-radius: 99px !important;
+    margin: 10px auto 4px auto !important;
+  }
+
+  /* Native Touch Micro-interactions */
+  .btn:active, .btn-accent:active, .icon-btn:active, .profile-btn:active, .drawer-item:active {
+    transform: scale(0.95) !important;
+    transition: transform 0.08s ease !important;
+  }
+
+  /* ==========================================================================
+     🎬 HERO COMPONENT: EDGE-TO-EDGE TOP BLEED & IMMERSIVE OVERLAY
+     ========================================================================== */
+  /* Topbar floats as a translucent frosted overlay over the hero backdrop */
+  .topbar {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    z-index: var(--z-topbar) !important;
+    padding: calc(env(safe-area-inset-top, 0px) + 8px) 16px 10px !important;
+    background: linear-gradient(180deg, rgba(7, 9, 14, 0.85) 0%, rgba(7, 9, 14, 0.4) 65%, transparent 100%) !important;
+    backdrop-filter: blur(14px) !important;
+    -webkit-backdrop-filter: blur(14px) !important;
+    border-bottom: none !important;
+  }
+
+  /* Eliminate dead black space between topbar and hero image */
+  main, .app-main, .main-content, .app {
+    padding-top: 0 !important;
+    margin-top: 0 !important;
+  }
+
+  /* Non-hero views maintain safe clearance below fixed topbar */
+  .app > :first-child:not(.hero) {
+    margin-top: calc(58px + env(safe-area-inset-top, 0px)) !important;
+  }
+
+  /* Hero image bleeds seamlessly to the very top edge of screen */
+  .hero {
+    position: relative !important;
+    margin-top: 0 !important;
+    height: 68vh !important;
+    min-height: 480px !important;
+    padding: calc(env(safe-area-inset-top, 0px) + 68px) 18px 24px !important;
+    display: flex !important;
+    align-items: flex-end !important;
+    overflow: hidden !important;
+  }
+
+  .hero-slide {
+    position: absolute !important;
+    inset: 0 !important;
+    background-size: cover !important;
+    background-position: center top !important;
+  }
+
+  /* Smooth gradient fade into background with no hard color cuts */
+  .hero-slide::after {
+    content: "" !important;
+    position: absolute !important;
+    inset: 0 !important;
+    background: linear-gradient(180deg, rgba(7, 9, 14, 0.45) 0%, rgba(7, 9, 14, 0.05) 40%, rgba(10, 10, 15, 0.72) 75%, var(--bg) 100%),
+                linear-gradient(90deg, rgba(10, 10, 15, 0.85) 0%, rgba(10, 10, 15, 0.15) 75%, transparent 100%) !important;
+  }
+
+  .hero-content {
+    position: relative !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    z-index: 2 !important;
+  }
+
+  .hero-title {
+    font-size: 30px !important;
+    line-height: 1.1 !important;
+    margin-bottom: 8px !important;
+    letter-spacing: -0.02em !important;
+  }
+
+  .hero-meta {
+    gap: 8px !important;
+    margin-bottom: 8px !important;
+    font-size: 13px !important;
+    flex-wrap: wrap !important;
+  }
+
+  .hero-overview {
+    font-size: 13.5px !important;
+    line-height: 1.5 !important;
+    -webkit-line-clamp: 2 !important;
+    /* Was 14px, with the dots overlapping it. The description and the CTAs
+       were almost touching. */
+    margin-bottom: 16px !important;
+  }
+
+  /* Primary Action Buttons: Clean 2-column full-width grid */
+  .hero-actions {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 10px !important;
+    width: 100% !important;
+    margin-top: 0 !important;   /* .hero-dots now owns the gap above */
+  }
+
+  .hero-actions .btn {
+    width: 100% !important;
+    justify-content: center !important;
+    padding: 12px 14px !important;
+    font-size: 13.5px !important;
+    font-weight: 700 !important;
+    border-radius: 14px !important;
+    white-space: nowrap !important;
+    margin: 0 !important;
+  }
+
+  /* Carousel Navigation Buttons: Edge-aligned controls (zero crowding with CTAs) */
+  .hero-arrows {
+    position: absolute !important;
+    top: 45% !important;
+    left: 10px !important;
+    right: 10px !important;
+    bottom: auto !important;
+    transform: translateY(-50%) !important;
+    display: flex !important;
+    justify-content: space-between !important;
+    pointer-events: none !important;
+    z-index: 10 !important;
+    gap: 0 !important;
+  }
+
+  .hero-arrow {
+    pointer-events: auto !important;
+    width: 40px !important;
+    height: 40px !important;
+    border-radius: 50% !important;
+    background: rgba(8, 12, 20, 0.72) !important;
+    backdrop-filter: blur(16px) !important;
+    -webkit-backdrop-filter: blur(16px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.14) !important;
+    color: #ffffff !important;
+    display: grid !important;
+    place-items: center !important;
+    font-size: 22px !important;
+    line-height: 1 !important;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.6) !important;
+    transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease !important;
+  }
+
+  .hero-arrow:active {
+    transform: scale(0.9) !important;
+    background: rgba(46, 155, 214, 0.4) !important;
+    border-color: rgba(56, 189, 248, 0.5) !important;
+  }
+
+  /* Hero dots sit in the flow between the overview and the buttons, so the
+     spacing no longer depends on a magic `bottom` offset. */
+  .hero-dots {
+    position: static !important;
+    display: flex !important;
+    gap: 10px !important;
+    margin: 2px 0 18px !important;
+    z-index: 5 !important;
+  }
+}
+
+@keyframes revolutSheetSlideUp {
+  from {
+    transform: translateY(100%);
+    opacity: 0.85;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* ==========================================================================
+   📱 STANDALONE PWA DISPLAY MODE (HOME SCREEN BOOKMARK EXPERIENCE)
+   ========================================================================== */
+@media (display-mode: standalone) {
+  html, body {
+    overscroll-behavior-y: none !important;
+    -webkit-touch-callout: none !important;
+    -webkit-user-select: none !important;
+    user-select: none !important;
+  }
+
+  input, textarea {
+    -webkit-user-select: auto !important;
+    user-select: auto !important;
   }
 }
 /* ==========================================================================
@@ -1978,7 +2322,6 @@ body {
   overscroll-behavior-x: contain !important;
   scroll-behavior: auto !important;
   touch-action: pan-x pan-y !important;
-  will-change: scroll-position !important;
   padding: 6px 40px 16px !important;
   scrollbar-width: none !important;
   -webkit-transform: translateZ(0);
@@ -1989,11 +2332,21 @@ body {
   display: none !important;
 }
 
+/* Layer promotion belongs on the SCROLLER, not on every tile.
+   This block used to force `transform: translateZ(0)` + `backface-visibility:
+   hidden` on every `.card`, and styles.css added `will-change: transform` on
+   top — three separate ways of saying "give this element its own compositor
+   layer". With a few hundred posters on screen that is a few hundred GPU
+   textures at 2-3x DPR, which is what made scrolling stutter on a phone: the
+   compositor spends its time evicting and re-uploading layers instead of
+   drawing frames. `.row-scroll` is promoted once per rail, which is the right
+   granularity.
+
+   Removing the `!important` transform also un-breaks the desktop hover zoom:
+   `.card:hover { transform: scale(1.05) ... }` in styles.css carries no
+   `!important`, so it was losing to the `translateZ(0)` above and never applied. */
 .card {
   flex: 0 0 auto !important;
-  transform: translateZ(0) !important;
-  -webkit-backface-visibility: hidden !important;
-  backface-visibility: hidden !important;
   contain: content !important;
 }
 
@@ -2017,7 +2370,7 @@ body {
 #settings {
   position: fixed;
   inset: 0;
-  z-index: 1100;
+  z-index: var(--z-settings);
   display: flex !important;
   align-items: center;
   justify-content: center;
@@ -2625,3 +2978,631 @@ body {
   }
 }
 
+/* ==========================================================================
+   ⭐ GLOBAL INLINE IMDB BADGE COMPONENT (CROSS-PLATFORM DESKTOP & MOBILE)
+   ========================================================================== */
+.imdb-inline-badge {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4.5px !important;
+  vertical-align: middle !important;
+  background: rgba(12, 14, 20, 0.88) !important;
+  border: 1px solid rgba(245, 197, 24, 0.45) !important;
+  border-radius: 6px !important;
+  padding: 2px 7px 2px 3.5px !important;
+  text-decoration: none !important;
+  color: #ffffff !important;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  line-height: 1 !important;
+  cursor: pointer !important;
+  margin-left: 6px !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45) !important;
+  transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease !important;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+  -webkit-tap-highlight-color: transparent !important;
+}
+
+.imdb-inline-badge:hover {
+  background: rgba(245, 197, 24, 0.18) !important;
+  border-color: #f5c518 !important;
+  color: #ffffff !important;
+  transform: translateY(-1px) scale(1.03) !important;
+  box-shadow: 0 4px 14px rgba(245, 197, 24, 0.35) !important;
+}
+
+.imdb-inline-badge:active {
+  transform: scale(0.95) !important;
+}
+
+.imdb-inline-badge .imdb-badge-icon {
+  display: flex !important;
+  align-items: center !important;
+  flex: 0 0 auto !important;
+  line-height: 1 !important;
+}
+
+.imdb-inline-badge .imdb-badge-icon svg {
+  display: block !important;
+  border-radius: 2.5px !important;
+  width: 28px !important;
+  height: 14px !important;
+}
+
+.imdb-inline-badge .imdb-badge-score {
+  color: #f5c518 !important;
+  font-weight: 800 !important;
+  font-size: 12px !important;
+  letter-spacing: -0.01em !important;
+  line-height: 1 !important;
+}
+
+.imdb-inline-badge .imdb-badge-scale {
+  color: #8a92a6 !important;
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  margin-left: -2px !important;
+  line-height: 1 !important;
+}
+
+.imdb-inline-badge .imdb-badge-votes {
+  color: #64748b !important;
+  font-size: 9.5px !important;
+  font-weight: 600 !important;
+  margin-left: 2px !important;
+  line-height: 1 !important;
+}
+
+/* Mobile Fine-Tuning.
+   Previously this SHRANK the badge on phones (11px text, 12.5px icon, ~16px
+   tall) while every sibling in `.modal-meta` — the `.chip` pills and the star
+   rating — sits at ~26px. The badge read as a small misaligned lump in the row
+   and the score was the hardest thing in it to read, which is the opposite of
+   what it should be on the smallest screen.
+
+   It now matches the sibling chip box so it sits on the same optical line, and
+   the score is the largest element in the badge. */
+@media (max-width: 768px) {
+  .imdb-inline-badge {
+    padding: 3px 8px 3px 4px !important;
+    gap: 4px !important;
+    font-size: 12px !important;
+    min-height: 26px !important;
+    box-sizing: border-box !important;
+    align-self: center !important;
+    /* `gap` on the flex row already spaces this; the extra margin pushed the
+       badge out of alignment with its neighbours. */
+    margin-left: 0 !important;
+  }
+  .imdb-inline-badge .imdb-badge-icon svg {
+    width: 27px !important;
+    height: 13.5px !important;
+  }
+  .imdb-inline-badge .imdb-badge-score {
+    font-size: 13.5px !important;
+    font-weight: 900 !important;
+  }
+  .imdb-inline-badge .imdb-badge-scale {
+    font-size: 10.5px !important;
+  }
+  /* Votes are the first thing to sacrifice on a 390px row — dropping them
+     keeps the score itself on one line instead of wrapping the badge. */
+  .imdb-inline-badge .imdb-badge-votes {
+    display: none !important;
+  }
+}
+
+/* ==========================================================================
+   🎬 POSTER CARD BADGE OVERLAY (PINNED SECURELY TO TOP-LEFT OF POSTER ART)
+   ========================================================================== */
+.card, .media-card, .poster-container, .col-part-poster-wrap {
+  position: relative !important;
+}
+
+.card .rating-badge-group,
+.media-card .rating-badge-group,
+.poster-container .rating-badge-group,
+.col-part-card .rating-badge-group {
+  position: absolute !important;
+  top: 8px !important;
+  left: 8px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  z-index: 10 !important;
+  margin: 0 !important;
+  line-height: 1 !important;
+}
+
+/* IMDb Badge on Poster Cards: Pinned Top-Left with Strong Dimmed Backdrop for Legibility */
+.card .imdb-card-badge,
+.media-card .imdb-card-badge,
+.poster-container .imdb-card-badge,
+.card .imdb-inline-badge,
+.media-card .imdb-inline-badge,
+.poster-container .imdb-inline-badge,
+.col-part-card .imdb-inline-badge {
+  /* No backdrop-filter here. These badges sit on EVERY poster card, over an
+     opaque background (alpha .9+) and on top of the poster art — the blur was
+     not visible, but the compositor still had to snapshot and blur a backdrop
+     region per badge per frame. With ~20 cards on screen that is ~40 live blur
+     regions fighting every scroll frame. Removing it costs nothing visually. */
+  position: relative !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  background: rgba(8, 10, 16, 0.92) !important;
+  border: 1px solid rgba(245, 197, 24, 0.45) !important;
+  border-radius: 6px !important;
+  padding: 2.5px 6px 2.5px 4px !important;
+  line-height: 1 !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.75), 0 1px 3px rgba(0, 0, 0, 0.9) !important;
+  margin: 0 !important;
+  text-decoration: none !important;
+  cursor: pointer !important;
+  transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease !important;
+}
+
+/* Direct child fallback if placed without .rating-badge-group */
+.card > .imdb-inline-badge,
+.media-card > .imdb-inline-badge,
+.poster-container > .imdb-inline-badge,
+.card > .imdb-card-badge {
+  position: absolute !important;
+  top: 8px !important;
+  left: 8px !important;
+  z-index: 10 !important;
+  margin: 0 !important;
+}
+
+.card .imdb-card-badge:hover,
+.card .imdb-inline-badge:hover {
+  background: rgba(245, 197, 24, 0.22) !important;
+  border-color: #f5c518 !important;
+  transform: scale(1.05) !important;
+  box-shadow: 0 4px 16px rgba(245, 197, 24, 0.4) !important;
+}
+
+.card .imdb-card-badge .imdb-svg,
+.card .imdb-inline-badge .imdb-svg {
+  display: block !important;
+  flex-shrink: 0 !important;
+}
+
+.card .imdb-card-badge .sc,
+.card .imdb-inline-badge .imdb-badge-score {
+  color: #f5c518 !important;
+  font-weight: 900 !important;
+  font-size: 11px !important;
+  line-height: 1 !important;
+  letter-spacing: -0.2px !important;
+}
+
+/* TMDB Mini Badge on Poster Cards */
+.card .tmdb-mini-badge,
+.media-card .tmdb-mini-badge,
+.poster-container .tmdb-mini-badge {
+  /* No backdrop-filter here. These badges sit on EVERY poster card, over an
+     opaque background (alpha .9+) and on top of the poster art — the blur was
+     not visible, but the compositor still had to snapshot and blur a backdrop
+     region per badge per frame. With ~20 cards on screen that is ~40 live blur
+     regions fighting every scroll frame. Removing it costs nothing visually. */
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 3px !important;
+  background: rgba(10, 16, 26, 0.9) !important;
+  border: 1px solid rgba(1, 180, 228, 0.4) !important;
+  border-radius: 6px !important;
+  padding: 2.5px 6px !important;
+  line-height: 1 !important;
+  font-size: 10.5px !important;
+  font-weight: 800 !important;
+  color: #90cea1 !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.75), 0 1px 3px rgba(0, 0, 0, 0.9) !important;
+  margin: 0 !important;
+}
+
+.card .tmdb-mini-badge .tmdb-lbl,
+.media-card .tmdb-mini-badge .tmdb-lbl {
+  font-size: 7.5px !important;
+  font-weight: 900 !important;
+  color: #01b4e4 !important;
+  letter-spacing: 0.3px !important;
+  line-height: 1 !important;
+}
+
+
+
+
+/* ==========================================================================
+   AUDIT REMEDIATION — 2026-09-09
+   Safe areas on every overlay, iOS input zoom, and 44x44 touch targets.
+   ========================================================================== */
+
+/* --- Safe areas ----------------------------------------------------------
+   apple-mobile-web-app-status-bar-style=black-translucent + viewport-fit=cover
+   put the web view under the status bar AND the home indicator. Previously
+   only .topbar and .bottom-nav consumed the insets, so modal close buttons sat
+   under the Dynamic Island and sticky footers under the home indicator. */
+.modal,
+.req-overlay,
+.drawer-overlay,
+.login-overlay,
+#settings {
+  padding-left:  max(env(safe-area-inset-left, 0px), 0px);
+  padding-right: max(env(safe-area-inset-right, 0px), 0px);
+}
+
+@media (max-width: 768px) {
+  .modal { padding-bottom: 0 !important; padding-top: env(safe-area-inset-top, 0px) !important; }
+  .modal-card {
+    padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px)) !important;
+    max-height: calc(89vh - env(safe-area-inset-top, 0px)) !important;
+  }
+  /* Close buttons clear the notch / Dynamic Island. */
+  .modal-close     { top: calc(14px + env(safe-area-inset-top, 0px)) !important; }
+  .req-modal-close { top: calc(14px + env(safe-area-inset-top, 0px)) !important; }
+  /* Sticky modal footer clears the home indicator. */
+  .req-footer      { padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)) !important; }
+  /* Drawer clears both edges. */
+  .drawer-panel    { padding-top: env(safe-area-inset-top, 0px); }
+  .drawer-body     { padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
+}
+
+/* --- iOS input auto-zoom -------------------------------------------------
+   Mobile Safari zooms the viewport whenever a focused control computes below
+   16px. `user-scalable=no` does NOT prevent this on iOS 10+. The search field
+   was the worst case at 13px, so every tap on it zoomed the whole layout.
+   Scoped to coarse pointers so desktop keeps its denser type scale. */
+@media (pointer: coarse) {
+  input, select, textarea,
+  .field input, .field select,
+  .req-field select, .tag-input,
+  .topbar .search-box input {
+    font-size: 16px !important;
+    line-height: 1.25;
+  }
+  /* 16px text needs a little more room than the old 13px. */
+  .topbar .search-box input       { width: 150px !important; }
+  .topbar .search-box input:focus { width: 200px !important; }
+}
+
+/* --- Touch targets (44x44 minimum) --------------------------------------- */
+@media (pointer: coarse) {
+  .icon-btn,
+  .profile-btn,
+  .mobile-menu-btn,
+  .modal-close,
+  .req-modal-close,
+  .hero-arrow {
+    min-width: 44px !important;
+    min-height: 44px !important;
+    display: grid !important;
+    place-items: center !important;
+  }
+
+  .tag-chip { min-height: 44px; display: inline-flex; align-items: center; }
+
+  /* The dot must stay visually 8px, so expand only its hit area via a
+     pseudo-element rather than growing the painted dot. */
+  .hero-dot { position: relative; }
+  .hero-dot::after {
+    content: "";
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 44px; height: 44px;
+  }
+  /* Dots sat 6-7px apart, so the expanded hit areas would overlap. */
+  .hero-dots { gap: 18px !important; }
+}
+
+/* --- Horizontal row scrolling -------------------------------------------
+   `touch-action: pan-x` DOES NOT let vertical drags through. The comment that
+   used to sit here claimed it did, and that was wrong.
+
+   Per the Touch Action spec the browser intersects the touch-action values from
+   the hit-tested element up through its ancestors, and the touch is restricted
+   to what survives that intersection. So `pan-x` on a rail means a touch that
+   STARTS on a poster may only ever pan horizontally — the page cannot scroll
+   vertically from it, anywhere in the chain. Poster rails cover nearly the whole
+   home screen on a phone, so in practice the home screen could not be scrolled
+   up or down at all: the finger almost always lands on a rail.
+
+   Worse, because a vertical drag was not a permitted pan, nothing consumed the
+   gesture and it resolved as a TAP — which is where the "random movies open
+   while I'm scrolling" behaviour came from.
+
+   `pan-x pan-y` permits both. The rail is `overflow-y: hidden`, so a vertical
+   pan is handled by the nearest scrollable ancestor, which is the page. */
+.row-scroll, .cast-row { touch-action: pan-x pan-y !important; }
+
+/* --- Add to Home Screen prompt ------------------------------------------- */
+.a2hs {
+  position: fixed;
+  left: 12px; right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  z-index: var(--z-toast);
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 16px;
+  background: rgba(14, 21, 33, .96);
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 18px;
+  box-shadow: 0 18px 50px rgba(0,0,0,.7);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+  transform: translateY(160%);
+  opacity: 0;
+  transition: transform .28s cubic-bezier(.16,1,.3,1), opacity .2s ease;
+}
+.a2hs.in { transform: translateY(0); opacity: 1; }
+.a2hs-icon { border-radius: 11px; flex: 0 0 auto; }
+.a2hs-copy { flex: 1; min-width: 0; }
+.a2hs-t { margin: 0 0 2px; font-size: 14.5px; font-weight: 800; color: #fff; }
+.a2hs-b { margin: 0; font-size: 12.5px; line-height: 1.4; color: #9db0c4; }
+.a2hs-ic { display: inline-flex; vertical-align: -3px; color: #38bdf8; }
+.a2hs-actions { display: flex; flex-direction: column; gap: 6px; flex: 0 0 auto; }
+.a2hs-go, .a2hs-no {
+  min-height: 44px; min-width: 88px;
+  border-radius: 12px; font-weight: 700; font-size: 13px;
+  cursor: pointer; border: 1px solid transparent;
+}
+.a2hs-go { background: #2E9BD6; color: #fff; }
+.a2hs-no { background: transparent; color: #8fa3b8; border-color: rgba(255,255,255,.14); }
+
+@media (min-width: 700px) { .a2hs { left: auto; right: 20px; max-width: 420px; } }
+@media (prefers-reduced-motion: reduce) {
+  .a2hs { transition: none; transform: none; opacity: 1; }
+}
+/* Never advertise "install" inside the already-installed app. */
+@media (display-mode: standalone) { .a2hs { display: none !important; } }
+
+/* ==========================================================================
+   TOPBAR OVERFLOW ON NARROW SCREENS
+   ==========================================================================
+   .topbar-right (search + refresh + profile avatar) was laid out at its
+   natural width with no shrink, so on a 375px viewport it measured 318px
+   starting at x=211 — i.e. it needed 529px. The profile button ended up ~98px
+   PAST the right edge: still display:grid / visible / opacity:1, but with its
+   centre off-canvas and therefore untappable.
+
+   Profile switching was still reachable via the drawer ("Switch Profile"), so
+   this was a clipped redundant control rather than a dead end — but a visible
+   button nobody can press is a bug either way.
+
+   Fix: let the search field absorb the remaining space instead of claiming a
+   fixed 150px, and keep the two 44px touch targets unshrinkable. */
+/* Below ~430px the wordmark is what actually breaks the layout: the ☰ button
+   (44) + logo mark (34) + "NickSeer" text (87) claimed 185px of a 375px bar,
+   leaving too little for the search field and the two 44px touch targets.
+   The logo mark stays, so the brand is still present. */
+@media (max-width: 430px) {
+  .topbar .brand-text { display: none !important; }
+}
+
+@media (max-width: 560px) {
+  .topbar { gap: 10px !important; }
+
+  .topbar-right {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    justify-content: flex-end !important;
+    gap: 8px !important;
+  }
+
+  /* min-width:0 is what actually permits a flex item to shrink below its
+     content width — without it the input keeps its intrinsic size. */
+  .topbar .search-box {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+  }
+  .topbar .search-box input,
+  .topbar .search-box input:focus {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  /* The 44x44 touch targets must never be the thing that shrinks. */
+  .topbar-right .icon-btn,
+  .topbar-right .profile-btn,
+  .topbar-right .pm-wrap {
+    flex: 0 0 auto !important;
+  }
+}
+
+/* ==========================================================================
+   TOPBAR OVERFLOW ON DESKTOP (admin nav)
+   ==========================================================================
+   Separate from the narrow-screen case above. An admin sees 12 nav items,
+   which measured 1067px at a 1440px viewport and pushed .topbar-right (search,
+   refresh, profile, settings) to end at 1502 — 62px off-screen, so the profile
+   and settings buttons were unreachable. A non-admin has fewer items and never
+   hit it, which is why it went unnoticed.
+
+   .nav-links could already shrink (flex: 0 1 auto) but had the default
+   min-width:auto, which forbids a flex item shrinking below its content size.
+   min-width:0 is what actually unlocks it; overflow-x lets the overflow scroll
+   instead of spilling. The right-hand controls never shrink. */
+.topbar-left { flex: 0 0 auto; }
+
+.nav-links {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;          /* matches the app's hidden-scrollbar style */
+  -ms-overflow-style: none;
+}
+.nav-links::-webkit-scrollbar { display: none; }
+
+.topbar-right {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+/* ==========================================================================
+   REQUEST SHEET GRAB BAR
+   ==========================================================================
+   .modal-card already draws a grab bar on mobile; .req-card renders as a
+   bottom sheet too but had none. Both now support swipe-down-to-dismiss
+   (overlay.js), so both should advertise it. */
+@media (max-width: 768px) {
+  .req-card::before {
+    content: '';
+    display: block;
+    width: 38px;
+    height: 4.5px;
+    background: rgba(255, 255, 255, 0.26);
+    border-radius: 99px;
+    margin: 10px auto 2px auto;
+    flex: 0 0 auto;
+  }
+}
+
+/* ==========================================================================
+   REVOLUT-STYLE INTERACTION LAYER
+   --------------------------------------------------------------------------
+   Requested 2026-09-16: "make all buttons and feel of NickSeer be like you are
+   in Revolut".
+
+   Deliberately ONE authoritative block at the end of the file rather than edits
+   scattered across the 500+ !important declarations above — in a cascade this
+   contested, a single late layer is the only thing that reliably wins, and it
+   keeps the design system readable in one place.
+
+   What actually characterises that feel, and what is implemented here:
+     1. Generous rounding (16px), not the timid 10px.
+     2. Big touch targets — 48px minimum on phones.
+     3. A confident, fast press: scale down with a spring curve, ~120ms.
+     4. One easing curve everywhere, so nothing feels out of step.
+     5. No tap-highlight rectangles, no lingering focus outlines on touch.
+     6. Weight and tracking that read as deliberate rather than default.
+
+   COLOUR IS NOT TOUCHED. Variants (.btn-primary/.btn-accent/.btn-imdb) and the
+   inline backgrounds on the In Library / Requested states keep their own
+   palette; this layer only governs shape, spacing and motion.
+   ========================================================================== */
+
+:root {
+  /* One spring for the whole app. */
+  --ns-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --ns-press: cubic-bezier(0.3, 0, 0.2, 1);
+  --ns-radius-btn: 16px;
+  --ns-radius-sheet: 28px;
+}
+
+.btn,
+.icon-btn,
+.seg-btn,
+.appr-btn,
+.profile-btn {
+  border-radius: var(--ns-radius-btn) !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.01em !important;
+  -webkit-tap-highlight-color: transparent !important;
+  transition:
+    transform 0.12s var(--ns-press),
+    background-color 0.18s var(--ns-spring),
+    box-shadow 0.18s var(--ns-spring),
+    opacity 0.18s var(--ns-spring) !important;
+}
+
+/* The press. Scale is the whole trick: it reads as the surface yielding under
+   the finger, and it must be FAST — anything over ~140ms feels like lag. */
+.btn:active:not(:disabled),
+.icon-btn:active,
+.seg-btn:active,
+.appr-btn:active,
+.profile-btn:active,
+.tag-chip:active,
+.drawer-item:active,
+.bottom-nav-item:active {
+  transform: scale(0.96) !important;
+  transition: transform 0.08s var(--ns-press) !important;
+}
+
+/* A disabled control should not pretend to be pressable. */
+.btn:disabled,
+.btn[disabled] {
+  transform: none !important;
+  cursor: default !important;
+}
+
+/* Keyboard focus keeps a visible ring; touch and mouse do not get a stray
+   outline left behind after the press. */
+.btn:focus-visible,
+.icon-btn:focus-visible,
+.seg-btn:focus-visible,
+.bottom-nav-item:focus-visible {
+  outline: none !important;
+  box-shadow: 0 0 0 3px rgba(46, 155, 214, 0.45) !important;
+}
+
+/* Sheets: rounder, and they arrive on the same spring as everything else. */
+.modal-card,
+.req-card {
+  border-radius: var(--ns-radius-sheet) var(--ns-radius-sheet) 0 0 !important;
+}
+
+@media (max-width: 768px) {
+  /* Thumb-sized targets. Revolut never makes you aim. */
+  .btn,
+  .seg-btn,
+  .appr-btn {
+    min-height: 48px !important;
+    padding: 13px 18px !important;
+    font-size: 15px !important;
+    border-radius: var(--ns-radius-btn) !important;
+  }
+
+  .icon-btn,
+  .profile-btn {
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+
+  /* The hero pair keeps its two-up grid but inherits the same target height. */
+  .hero-actions .btn {
+    min-height: 48px !important;
+    font-size: 14.5px !important;
+    border-radius: var(--ns-radius-btn) !important;
+  }
+
+  /* Bottom nav: press feedback on the item, not a highlight rectangle. */
+  .bottom-nav-item {
+    -webkit-tap-highlight-color: transparent !important;
+    transition: transform 0.12s var(--ns-press), color 0.18s var(--ns-spring) !important;
+  }
+
+  /* Rounder cards read softer, closer to Revolut's card language. */
+  .card {
+    border-radius: 16px !important;
+  }
+}
+
+/* Respect the system setting — every transform above collapses to nothing. */
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .icon-btn,
+  .seg-btn,
+  .appr-btn,
+  .profile-btn,
+  .tag-chip,
+  .drawer-item,
+  .bottom-nav-item,
+  .card {
+    transition: none !important;
+  }
+  .btn:active:not(:disabled),
+  .icon-btn:active,
+  .seg-btn:active,
+  .appr-btn:active,
+  .profile-btn:active,
+  .tag-chip:active,
+  .drawer-item:active,
+  .bottom-nav-item:active {
+    transform: none !important;
+  }
+}
