@@ -95,10 +95,12 @@ html, body {
   box-shadow: 0 2px 8px rgba(0, 168, 225, 0.3);
 }
 .own-pill.stream-pill.stream-paramount {
-  background: linear-gradient(135deg, #0047BA, #001f5c);
-  border-color: rgba(0, 71, 186, 0.55);
-  box-shadow: 0 2px 8px rgba(0, 71, 186, 0.4);
+  /* Same light tint as Netflix / Prime instead of a solid blue gradient. */
+  background: rgba(0, 100, 255, 0.16);
+  border-color: rgba(70, 140, 255, 0.55);
+  box-shadow: none;
 }
+.own-pill.stream-pill.stream-paramount svg { width: 16px; }
 .own-pill.stream-pill.stream-hulu {
   background: rgba(11, 35, 26, 0.85);
   border-color: rgba(28, 231, 131, 0.5);
@@ -3742,4 +3744,75 @@ body {
    sheet visibly jumped when the data arrived. */
 @media (max-width: 768px) {
   .modal-body.modal-shell { min-height: 60vh; }
+}
+/* ==========================================================================
+   Visual polish — 2026-11-09
+   ========================================================================== */
+
+/* Focus ring only for remote / keyboard. nav.js sets <html data-input> to
+   touch | mouse | keys; the ring was showing on phones as a "stuck" highlight
+   on the first hero button. Any arrow/OK/Back key brings it straight back. */
+html:not([data-input="keys"]) [data-nav].nav-focus,
+html:not([data-input="keys"]) button.nav-focus,
+html:not([data-input="keys"]) input.nav-focus,
+html:not([data-input="keys"]) .nav-link.nav-focus,
+html:not([data-input="keys"]) .card.nav-focus,
+html:not([data-input="keys"]) .profile-tile.nav-focus,
+html:not([data-input="keys"]) .bottom-nav-item.nav-focus,
+html:not([data-input="keys"]) .btn:focus-visible,
+html:not([data-input="keys"]) .icon-btn:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+/* Hero: on desktop the dots join the arrows bottom-right (‹ • • • ›). */
+.hero-arrows { align-items: center; }
+.hero-arrows .hero-dots { margin: 0 8px; }
+/* Phones: swipe replaces the arrows (app.js heroSlideshow); dots stay
+   tappable above the buttons. */
+@media (max-width: 768px) {
+  .hero-arrows { display: none !important; }
+}
+
+/* Toasts: bottom-right on desktop so they never cover the first poster row;
+   on phones they sit above the bottom nav bar instead of on top of it. */
+.toasts { left: auto; right: 24px; transform: none; align-items: flex-end; }
+@media (max-width: 768px) {
+  .toasts { right: 12px; left: 12px; align-items: stretch; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
+  .toasts .toast { min-width: 0; }
+}
+
+/* Title without artwork: tinted card instead of a flat grey box. */
+.card-fallback-art {
+  display: flex !important; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  background:
+    radial-gradient(120% 80% at 50% 0%, hsla(var(--fh), 55%, 45%, .55), transparent 70%),
+    linear-gradient(180deg, hsl(var(--fh), 30%, 16%), hsl(var(--fh), 25%, 9%));
+  border-radius: inherit; color: #fff; padding: 14px !important;
+}
+.card-fallback-art .cf-ico { font-size: 26px; opacity: .85; }
+.card-fallback-art .cf-title { font-weight: 800; font-size: 14px; line-height: 1.2; text-align: center; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.card-fallback-art .cf-year { font-size: 12px; color: rgba(255,255,255,.65); font-weight: 700; }
+
+/* Phones: a calmer top bar. ⟳ Refresh and ⚙ Settings move into the ☰ drawer
+   (Settings was already there), which gives the search box the room it needs —
+   it used to be squeezed down to "Sear". A magnifier icon marks the field. */
+@media (max-width: 768px) {
+  #refreshBtn, #settingsBtn { display: none !important; }
+  .topbar .search-box input {
+    padding-left: 34px !important;
+    background: rgba(255,255,255,.07) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239aa0ad' stroke-width='2.4' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20 20l-3.5-3.5'/%3E%3C/svg%3E") no-repeat 11px center !important;
+  }
+  /* Hero was 68vh: the first poster row started ~80% down the screen. */
+  .hero { height: 56vh !important; min-height: 420px !important; }
+}
+
+/* Profile picker ("Who's watching?"): bigger tiles on desktop/TV — they were
+   115px in an empty full-screen page. Phones keep their own 90px size. */
+@media (min-width: 769px) {
+  .profile-overlay .profile-h1 { font-size: 44px; margin-bottom: 40px; }
+  .profile-overlay .profile-grid { gap: 34px; }
+  .profile-overlay .profile-face { width: 150px; height: 150px; font-size: 52px; border-radius: 24px; transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
+  .profile-overlay .profile-name { font-size: 18px; }
 }

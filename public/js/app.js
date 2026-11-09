@@ -553,6 +553,14 @@ function setupNavigation() {
     closeDrawer();
     chooseProfile(true);
   });
+  // Phones hide the top-bar ⟳ and ⚙ (see enhance.css) — both live in the drawer.
+  document.getElementById('drawerRefreshBtn')?.addEventListener('click', () => {
+    closeDrawer();
+    document.getElementById('refreshBtn')?.click();
+  });
+  try {
+    if (matchMedia('(max-width: 768px)').matches) document.getElementById('search')?.setAttribute('placeholder', 'Search titles…');
+  } catch { /* old browser */ }
 
   document.querySelectorAll('.nav-link[data-view], .bottom-nav-item[data-view], .drawer-item[data-view]').forEach((b) => {
     b.addEventListener('click', () => {
@@ -1189,8 +1197,24 @@ function heroSlideshow(items) {
   // w1280 backdrops are ~3.7MB decoded each and there are up to 7 slides.
   // w780 is still 2x on a 375px screen for ~1.4MB.
   const narrow = (() => { try { return matchMedia('(max-width: 768px)').matches; } catch { return false; } })();
-  const heroSize = narrow ? HERO_BACKDROP_SIZE_MOBILE : null;
-  const slides = items.map((it, i) => { const sl = el('div', { class: 'hero-slide' + (i === 0 ? ' on' : '') }); if (it.backdrop) sl.style.backgroundImage = `url(${heroSize ? tmdbSized(it.backdrop, heroSize) : it.backdrop})`; return sl; });
+  // Pick the TMDB size from the pixels the slide really covers. A 16:9
+  // backdrop `cover`-ed into the hero needs (width, or height × 16/9) × DPR
+  // pixels across. w1280 on a 2000px desktop hero, or w780 in a tall phone
+  // hero at 3× DPR, was being upscaled 1.6–3× — the soft look Nick reported.
+  const heroSize = (() => {
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    const w = window.innerWidth || 1280;
+    const h = narrow ? Math.max(420, window.innerHeight * 0.56) : Math.max(440, window.innerHeight * 0.64);
+    const need = Math.max(w, h * 16 / 9) * dpr;
+    return need <= 800 ? 'w780' : need <= 1300 ? 'w1280' : 'original';
+  })();
+  // Full-size backdrops are ~8–30MB each once decoded, so only the visible
+  // slide and the next one hold an image; the rest are filled just before
+  // they're shown (and the one after that is warmed in the background).
+  const slides = items.map((it, i) => el('div', { class: 'hero-slide' + (i === 0 ? ' on' : '') }));
+  const srcOf = (i) => (items[i] && items[i].backdrop ? tmdbSized(items[i].backdrop, heroSize) : null);
+  const loadSlide = (i) => { const sl = slides[i]; const src = srcOf(i); if (sl && src && !sl.dataset.src) { sl.dataset.src = src; sl.style.backgroundImage = `url(${src})`; } };
+  const unloadFar = (cur) => slides.forEach((sl, i) => { const d = (i - cur + items.length) % items.length; if (d > 1 && d < items.length - 1 && sl.dataset.src) { sl.style.backgroundImage = ''; delete sl.dataset.src; } });
   slides.forEach((s) => node.appendChild(s));
   const content = el('div', { class: 'hero-content' });
   const dots = el('div', { class: 'hero-dots' });
@@ -1224,8 +1248,11 @@ function heroSlideshow(items) {
     // top of the gap between the description and the CTAs and the whole block
     // read as cramped. In-flow, the spacing is deterministic however the
     // overview wraps. `paint()` clears content, so they are re-appended here.
-    content.appendChild(dots);
+    // Phones: dots in the flow above the buttons (see above). Desktop: they
+    // join the arrows bottom-right as one control (‹ • • • ›) — see below.
+    if (narrow) content.appendChild(dots);
     content.appendChild(el('div', { class: 'hero-actions' }, [el('button', { class: 'btn btn-primary', 'data-nav': '', onclick: () => openDetail(it), onpointerdown: () => prefetchDetail(it) }, '▶  Trailer & Details'), heroReqBtn]));
+    loadSlide(idx); loadSlide((idx + 1) % items.length); unloadFar(idx);
     slides.forEach((s, i) => s.classList.toggle('on', i === idx));
     dotEls.forEach((d, i) => d.classList.toggle('on', i === idx));
   };
@@ -1233,7 +1260,17 @@ function heroSlideshow(items) {
   const next = () => go(idx + 1); const prev = () => go(idx - 1);
   const restart = () => { stopSlideshow(); slideTimer = setInterval(next, 6000); };
   node.appendChild(content);
-  node.appendChild(el('div', { class: 'hero-arrows' }, [el('button', { class: 'hero-arrow', 'data-nav': '', title: 'Previous', onclick: prev }, '‹'), el('button', { class: 'hero-arrow', 'data-nav': '', title: 'Next', onclick: next }, '›')]));
+  node.appendChild(el('div', { class: 'hero-arrows' }, [el('button', { class: 'hero-arrow', 'data-nav': '', title: 'Previous', onclick: prev }, '‹'), narrow ? null : dots, el('button', { class: 'hero-arrow', 'data-nav': '', title: 'Next', onclick: next }, '›')]));
+  // Swipe left/right to change slide. On phones this replaces the arrows
+  // (hidden there): a mostly-horizontal drag of 45px+ moves one slide.
+  // Vertical drags fall through to the page scroll untouched.
+  let sx = 0, sy = 0, st = 0;
+  node.addEventListener('touchstart', (e) => { if (e.touches.length !== 1) return; sx = e.touches[0].clientX; sy = e.touches[0].clientY; st = Date.now(); }, { passive: true });
+  node.addEventListener('touchend', (e) => {
+    const t = e.changedTouches[0]; if (!t || !st) return;
+    const dx = t.clientX - sx, dy = t.clientY - sy; st = 0;
+    if (Math.abs(dx) >= 45 && Math.abs(dx) > Math.abs(dy) * 1.4) (dx < 0 ? next : prev)();
+  }, { passive: true });
   paint(); restart(); return node;
 }
 function stopSlideshow() { if (slideTimer) { clearInterval(slideTimer); slideTimer = null; } }
@@ -1319,7 +1356,17 @@ function card(item, rank) {
     }
     bindCardActivate(c, () => openDetail(item), () => prefetchDetail(item));
   if (item.poster) c.appendChild(posterImg(item.poster, item.title));
-  else c.appendChild(el('div', { class: 'card-fallback' }, item.title || 'No image'));
+  else {
+    // No artwork: a tinted card (hue hashed from the title, so it is stable)
+    // with an icon, the title and the year, instead of a flat grey box.
+    let h = 0; for (const ch of String(item.title || '')) h = (h * 31 + ch.charCodeAt(0)) % 360;
+    const tv = item.media === 'tv' || item.media === 'show';
+    c.appendChild(el('div', { class: 'card-fallback card-fallback-art', style: `--fh:${h}` }, [
+      el('span', { class: 'cf-ico' }, tv ? '📺' : '🎬'),
+      el('span', { class: 'cf-title' }, item.title || 'Untitled'),
+      item.year ? el('span', { class: 'cf-year' }, String(item.year)) : null
+    ]));
+  }
   if (item.rating) c.appendChild(el('div', { class: 'card-badge' }, stars(item.rating)));
   if (rank) c.appendChild(el('div', { class: 'card-rank' }, String(rank)));
   if (item.why) c.appendChild(el('div', { class: 'why-chip', title: item.why }, item.why));
@@ -1445,12 +1492,14 @@ export async function openDetail(item) {
         target: '_blank',
         rel: 'noopener noreferrer'
       }, [
-        el('span', { class: 'own-tick' }, '✓'),
-        'In library',
+        el('span', { class: 'own-tick' }, '▶'),
+        'Open in Plex',
         el('span', { class: 'lib-ext-icon', style: 'font-size:11px;opacity:0.85;margin-left:3px;' }, '↗')
       ]);
       ownBadges.appendChild(libLink);
-    } else {
+    } else if (!d.libraryKey) {
+      // Only when the In Library button below can't open the details sheet;
+      // otherwise this badge just repeated the button.
       ownBadges.appendChild(el('span', { class: 'own-pill in-lib', title: 'In your Plex library' }, [el('span', { class: 'own-tick' }, '✓'), 'In library']));
     }
   }
@@ -1655,7 +1704,9 @@ function renderMetadataBlock(d, media) {
   const studio = resolveStudio(d.productionCompanies || d.production_companies, d.streamingService);
   rows.push(makeRow('Studio', studio));
 
-  return el('div', { class: 'overseerr-metadata-card' }, rows);
+  // Hide rows that would only say "—" / "N/A" (no revenue, unknown studio…).
+  const filled = rows.filter((r) => { const v = (r.lastElementChild || r).textContent.trim(); return v && !/^(—|-|N\/A|Unknown|null|undefined)$/i.test(v); });
+  return el('div', { class: 'overseerr-metadata-card' }, filled);
 }
 
   const body = el('div', { class: 'modal-body' }, [

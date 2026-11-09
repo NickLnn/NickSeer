@@ -44,7 +44,7 @@ function injectStyles() {
   const st = document.createElement('style'); st.id = 'welcome-styles'; st.textContent = css; document.head.appendChild(st);
 }
 
-const MARK = `<svg viewBox="0 0 64 64"><defs><linearGradient id="wm" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2E9BD6"/><stop offset="1" stop-color="#0f5687"/></linearGradient></defs><rect width="64" height="64" rx="15" fill="url(#wm)"/><path d="M20 46V18h6l12 16V18h6v28h-6L26 30v16z" fill="#fff"/></svg>`;
+const MARK = `<svg viewBox="0 0 64 64"><rect width="64" height="64" rx="16" fill="#1866A8"/><path d="M17 48V16h9v32z" fill="#fff"/><path d="M38 16h9v32h-9z" fill="#fff"/><path d="M17 16h9l21 32h-9z" fill="#8EC1EC"/></svg>`;
 
 async function trendingBackdrops() {
   try {
@@ -79,7 +79,7 @@ async function show() {
   const last = localStorage.getItem(LAST_USER) || '';
   host.innerHTML = `
     <div class="wl-bg a"></div><div class="wl-bg b"></div><div class="wl-scrim"></div>
-    <div class="wl-top"><span class="wl-mark">${MARK}</span><span class="wl-word">NickSeer</span></div>
+    <div class="wl-top"><span class="wl-mark">${MARK}</span><span class="wl-word">nickseer</span></div>
     <div class="wl-card">
       <div class="wl-hi">Welcome back</div>
       <h1 class="wl-h1">Sign in to NickSeer</h1>

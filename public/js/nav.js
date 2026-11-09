@@ -64,6 +64,23 @@ function sectionOf(el) {
   return el.closest ? el.closest(SECTION_SELECTOR) : null;
 }
 
+// How the app is being driven right now: 'touch', 'mouse' or 'keys'. The
+// big blue remote-control focus ring only makes sense for keys (TV remote,
+// keyboard); on a phone it looked like a stuck highlight on the first button.
+// CSS hides the ring unless <html data-input="keys">. Pressing any arrow /
+// OK / Back key switches straight back, so TV use is unchanged.
+(function trackInput() {
+  const root = document.documentElement;
+  let coarse = false, mouse = false;
+  try { coarse = matchMedia('(pointer: coarse)').matches; mouse = matchMedia('(hover: hover) and (pointer: fine)').matches; } catch { /* old browser */ }
+  // TV browsers can report a "fine" pointer (LG Magic Remote) but are driven
+  // with the D-pad, so they always start in keys mode.
+  const tv = /Web0S|webOS|Tizen|SMART-TV|SmartTV|AFT[A-Z]|BRAVIA|Android TV|GoogleTV|HbbTV|NetCast|VIDAA/i.test(navigator.userAgent);
+  root.dataset.input = tv ? 'keys' : coarse ? 'touch' : mouse ? 'mouse' : 'keys';
+  document.addEventListener('pointerdown', (e) => { root.dataset.input = e.pointerType === 'touch' || e.pointerType === 'pen' ? 'touch' : 'mouse'; }, { capture: true, passive: true });
+  document.addEventListener('keydown', (e) => { if (/^(Arrow|Enter|Tab|Escape|Backspace|Media|Go|Browser)/.test(e.key) || [8, 13, 461, 10009].includes(e.keyCode)) root.dataset.input = 'keys'; }, true);
+})();
+
 function setFocus(el) {
   if (!el) return;
   document.querySelectorAll('.nav-focus').forEach((n) => n.classList.remove('nav-focus'));

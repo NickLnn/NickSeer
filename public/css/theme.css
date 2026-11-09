@@ -18,7 +18,8 @@
 .nav-link.active { background: rgba(30,136,199,.18) !important; }
 
 /* Brand mark tile → Aegean; wordmark VISIBLE (no transparent clip). */
-.brand-mark svg rect { fill: url(#aegeanBrand) !important; }
+/* (logo tile colour now comes from logo.js — the old url(#aegeanBrand) fill
+   pointed at a gradient that was never defined) */
 .brand-text {
   background: none !important;
   -webkit-background-clip: initial !important; background-clip: initial !important;

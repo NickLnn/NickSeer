@@ -220,7 +220,7 @@ function liveNow() {
 // here). Covers every transcode cause the analysis sheet explains.
 const TAUT = await import('../../server/services/tautulli.js');
 const H_USERS = [[11, 'alex'], [12, 'NickLn'], [13, 'Maria'], [14, 'Guest']];
-const H_PLAYERS = [['webOS', 'LG OLED65C1', 'Plex for LG'], ['Tizen', 'Samsung TV', 'Plex for Samsung'], ['Android', 'Pixel 8', 'Plex for Android'], ['iOS', 'iPhone', 'Plex for iOS']];
+const H_PLAYERS = [['webOS', 'LG OLED65C1', 'Plex for LG'], ['Tizen', 'Samsung TV', 'Plex for Samsung'], ['Android', 'Pixel 8', 'Plex for Android'], ['iOS', 'iPhone', 'Plex for iOS'], ['Chrome', 'Chrome', 'Plex Web'], ['tvOS', 'Apple TV', 'Plex for Apple TV'], ['Roku', 'Roku Ultra', 'Plex for Roku'], ['Xbox', 'Xbox Series X', 'Plex for Xbox'], ['Windows', 'PC', 'Plex for Windows'], ['Playstation', 'PS5', 'Plex for PlayStation']];
 // [video_decision, audio_decision, transcode_decision, extra raw stream fields]
 const H_PROFILES = [
   ['direct play', 'direct play', 'direct play', {}],
@@ -286,8 +286,9 @@ function liveStats() {
     days: 30,
     topMovies: mv.map((m, i) => ({ name: m.title, total: 7 - i, year: m.year, ratingKey: H_RAW.find((r) => r.media_type === 'movie' && r.title === m.title)?.rating_key || null, poster: m.poster, id: m.id, media: 'movie' })),
     topTv: tv.map((m, i) => ({ name: m.title, total: 30 - i * 3, year: m.year, ratingKey: 100 + i, poster: m.poster, id: m.id, media: 'tv' })),
-    topUsers: H_USERS.map(([id, name], i) => ({ name, total: 50 - i * 9, userId: id, thumb: '' })),
-    topPlatforms: H_PLAYERS.map(([p], i) => ({ name: p, total: 80 - i * 15 }))
+    // One working avatar, one broken link (initial must take over), two without.
+    topUsers: H_USERS.map(([id, name], i) => ({ name, total: 50 - i * 9, userId: id, thumb: i === 0 ? 'http://localhost:5099/sandbox-poster/1003.svg' : i === 1 ? 'http://localhost:5099/missing-avatar.png' : '' })),
+    topPlatforms: H_PLAYERS.map(([p], i) => ({ name: p, total: 90 - i * 8 }))
   };
 }
 
@@ -403,7 +404,10 @@ function api(pathname, url, body) {
   // The real route returns a bare array of mini items, filtered by the query.
   if (pathname === '/api/discover/search') {
     const q = (url.searchParams.get('q') || '').toLowerCase();
-    return allItems.filter((it) => (it.title || '').toLowerCase().includes(q)).slice(0, 20);
+    const hits = allItems.filter((it) => (it.title || '').toLowerCase().includes(q)).slice(0, 20);
+    // A title TMDB has no poster for, so the no-artwork card is visible.
+    if (q.length >= 2 && 'gemini'.includes(q)) hits.splice(1, 0, { id: 990001, media: 'movie', title: 'Gemini', year: '2022', poster: null, backdrop: null, rating: 7.7 });
+    return hits;
   }
 
   if (pathname === '/api/discover/media-status') {
@@ -453,6 +457,8 @@ function api(pathname, url, body) {
       trailerKey: process.argv.includes('--trailers') ? 'aqz-KE-bpKQ' : null,
       inLibrary: Number(detail[2]) % 3 === 0,
       libraryKey: Number(detail[2]) % 3 === 0 ? String(7000000 + Number(detail[2])) : null,
+      plexUrl: Number(detail[2]) % 3 === 0 ? 'https://app.plex.tv/desktop' : null,
+      streamingService: Number(detail[2]) % 3 === 0 ? { key: 'paramount', name: 'Paramount+' } : null,
       isRequested: false,
       seriesStatus: detail[1] === 'tv' ? 'ended' : null,
       // Real cast shape (name/photo/character). Every fourth has no headshot so

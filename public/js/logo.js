@@ -1,79 +1,56 @@
-// logo.js — Official NickSeer Brand Logo & Favicon
-// Dark rounded tile with white calligraphic N and double Aegean wave.
+// logo.js — NickSeer brand mark (2026-11-09 redesign).
+// Revolut-style monogram, "folded N": two white pillars and a light-blue
+// diagonal (like a folded ribbon) on a flat deep-Aegean squircle; wordmark "nickseer" in lowercase, heavy and tight. This file is
+// the single source: every .brand-mark in the app (top bar, drawer, profile
+// picker, settings) is filled from here, and favicon.svg / the PNG app icons
+// are drawn from the same path.
 
-const LOGO_SVG = `
-<svg viewBox="0 0 64 64" width="34" height="34" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="nsTileDark" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#12161f"/>
-      <stop offset="100%" stop-color="#04060a"/>
-    </linearGradient>
-    <linearGradient id="nsWaveLight" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#3aa6e0"/>
-      <stop offset="50%" stop-color="#7dd3fc"/>
-      <stop offset="100%" stop-color="#ffffff"/>
-    </linearGradient>
-    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="1.5" stdDeviation="1.5" flood-color="#000000" flood-opacity="0.8"/>
-    </filter>
-  </defs>
-  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#nsTileDark)" stroke="rgba(255,255,255,0.14)" stroke-width="1.5"/>
-  <g filter="url(#glow)" fill="#ffffff">
-    <path d="M15.5 44.5
-             C15.2 36 15.2 26 15.6 18.6
-             C15.7 16.8 18.6 16.6 19.3 18.2
-             C24.6 26.5 30.5 34.6 36.4 42.1
-             C36.4 34.4 36.3 25.8 36.7 18.8
-             C36.8 16.4 41.4 16.3 41.6 18.8
-             C42 27 42 37.5 41.6 45.4
-             C41.5 47.4 38.4 47.7 37.4 46
-             C31.8 38.2 25.9 30.2 20.4 22.7
-             C20.5 30.2 20.6 38.4 20.3 44.6
-             C20.2 47.4 15.8 47.6 15.5 44.5 Z"/>
-    <path d="M13.6 18.4 C15.4 16.8 18.2 16.6 19.6 17.8 C17.8 17.4 15.6 17.6 13.6 18.4 Z" opacity=".95"/>
-  </g>
-  <path d="M8 50 C 15 46, 22 54, 30 50 C 38 46, 45 54, 56 49.5" fill="none" stroke="url(#nsWaveLight)" stroke-width="2.6" stroke-linecap="round"/>
-  <path d="M9 54.5 C 16 51, 22 58, 30 54.5 C 38 51, 44 58, 55 53.8" fill="none" stroke="#7dd3fc" stroke-width="1.6" stroke-linecap="round" opacity=".7"/>
-</svg>`;
+export const NS_AEGEAN = '#1866A8';
+export const NS_LIGHT = '#8EC1EC';
+// Drawn in this order: left pillar, right pillar, then the diagonal on top.
+export const NS_PARTS = [
+  ['M17 48V16h9v32z', '#fff'],
+  ['M38 16h9v32h-9z', '#fff'],
+  ['M17 16h9l21 32h-9z', NS_LIGHT]
+];
+export const LOGO_SVG = `<svg viewBox="0 0 64 64" width="34" height="34" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="nickseer"><rect width="64" height="64" rx="16" fill="${NS_AEGEAN}"/>${NS_PARTS.map(([d, f]) => `<path d="${d}" fill="${f}"/>`).join('')}</svg>`;
 
-const FAVICON_HREF = '/favicon.svg';
+const FAVICON_HREF = '/favicon.svg?v=4';
 
 function applyFavicon() {
-  let link = document.querySelector('link[rel="icon"]');
+  let link = document.querySelector('link[rel="icon"][type="image/svg+xml"]') || document.querySelector('link[rel="icon"]');
   if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
   link.type = 'image/svg+xml';
   link.href = FAVICON_HREF;
-  
-  let apple = document.querySelector('link[rel="apple-touch-icon"]');
-  if (!apple) { apple = document.createElement('link'); apple.rel = 'apple-touch-icon'; document.head.appendChild(apple); }
-  apple.href = FAVICON_HREF;
 }
 
-function applyMark() {
-  const mark = document.querySelector('#topbar .brand-mark');
-  if (mark) { mark.innerHTML = LOGO_SVG; mark.style.background = 'transparent'; mark.style.boxShadow = 'none'; }
+function applyMarks(root = document) {
+  root.querySelectorAll('.brand-mark:not([data-ns-mark])').forEach((m) => {
+    m.innerHTML = LOGO_SVG;
+    m.dataset.nsMark = '1';
+    m.style.background = 'transparent';
+    m.style.boxShadow = 'none';
+  });
 }
 
-function fixWordmark() {
+function styleWordmark() {
   if (document.getElementById('logo-fix-css')) return;
   const st = document.createElement('style'); st.id = 'logo-fix-css';
   st.textContent = `
     .brand-text{
       -webkit-background-clip: initial !important; background-clip: initial !important;
-      background: none !important; color: #eaf6ff !important;
-      -webkit-text-fill-color: #eaf6ff !important;
-      font-weight: 800; letter-spacing: -.02em; text-shadow: 0 1px 2px rgba(0,0,0,.35);
+      background: none !important; color: #ffffff !important; -webkit-text-fill-color: #ffffff !important;
+      text-transform: lowercase; font-weight: 800 !important; letter-spacing: -.035em !important;
+      text-shadow: none !important;
     }
-    .brand-mark svg{ border-radius: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.6); }`;
+    .brand-mark svg{ display:block; width:100%; height:100%; border-radius: 26%; box-shadow: none !important; }`;
   document.head.appendChild(st);
 }
 
-function boot() { fixWordmark(); applyMark(); applyFavicon(); }
+function boot() { styleWordmark(); applyMarks(); applyFavicon(); }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 60));
 else setTimeout(boot, 60);
 
-const obs = new MutationObserver(() => {
-  const m = document.querySelector('#topbar .brand-mark');
-  if (m && !m.querySelector('svg defs #nsTileDark')) applyMark();
-});
-obs.observe(document.body, { childList: true, subtree: true });
+// Marks rendered later (profile picker, settings, drawer) get filled too.
+new MutationObserver(() => { if (document.querySelector('.brand-mark:not([data-ns-mark])')) applyMarks(); })
+  .observe(document.body, { childList: true, subtree: true });

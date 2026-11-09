@@ -7,25 +7,7 @@ function token() { return localStorage.getItem(TOKEN_KEY) || ''; }
 function setToken(t) { localStorage.setItem(TOKEN_KEY, t); }
 function authHeaders() { const t = token(); return t ? { Authorization: 'Bearer ' + t } : {}; }
 
-const LOGO_SVG = `<svg viewBox="0 0 64 64" width="58" height="58" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="nsTileDark2" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#12161f"/>
-      <stop offset="100%" stop-color="#04060a"/>
-    </linearGradient>
-    <linearGradient id="nsWaveLight2" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#3aa6e0"/>
-      <stop offset="50%" stop-color="#7dd3fc"/>
-      <stop offset="100%" stop-color="#ffffff"/>
-    </linearGradient>
-  </defs>
-  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#nsTileDark2)" stroke="rgba(255,255,255,0.14)" stroke-width="1.5"/>
-  <g fill="#ffffff">
-    <path d="M15.5 44.5 C15.2 36 15.2 26 15.6 18.6 C15.7 16.8 18.6 16.6 19.3 18.2 C24.6 26.5 30.5 34.6 36.4 42.1 C36.4 34.4 36.3 25.8 36.7 18.8 C36.8 16.4 41.4 16.3 41.6 18.8 C42 27 42 37.5 41.6 45.4 C41.5 47.4 38.4 47.7 37.4 46 C31.8 38.2 25.9 30.2 20.4 22.7 C20.5 30.2 20.6 38.4 20.3 44.6 C20.2 47.4 15.8 47.6 15.5 44.5 Z"/>
-  </g>
-  <path d="M8 50 C 15 46, 22 54, 30 50 C 38 46, 45 54, 56 49.5" fill="none" stroke="url(#nsWaveLight2)" stroke-width="2.6" stroke-linecap="round"/>
-  <path d="M9 54.5 C 16 51, 22 58, 30 54.5 C 38 51, 44 58, 55 53.8" fill="none" stroke="#7dd3fc" stroke-width="1.6" stroke-linecap="round" opacity=".7"/>
-</svg>`;
+const LOGO_SVG = `<svg viewBox="0 0 64 64" width="58" height="58" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="nickseer"><rect width="64" height="64" rx="16" fill="#1866A8"/><path d="M17 48V16h9v32z" fill="#fff"/><path d="M38 16h9v32h-9z" fill="#fff"/><path d="M17 16h9l21 32h-9z" fill="#8EC1EC"/></svg>`;
 
 export async function getMe() {
   if (!token()) return null;
@@ -185,7 +167,7 @@ export function promptReauth(username, { isPlex = false, thumb = '' } = {}) {
           ? `<button class="login-plex" id="raPlex"><svg width="18" height="18" viewBox="0 0 24 24"><path fill="#1b1b1b" d="M4 2h6l6 10-6 10H4l6-10z"/></svg> Sign in with Plex</button>`
           : `<div class="login-field"><label>Password</label><input id="raPass" type="password" autocomplete="current-password"></div><button class="login-btn" id="raGo">Continue</button>`}
         <div class="login-err" id="raErr"></div>
-        <button class="btn btn-ghost" id="raCancel" data-nav style="width:100%;margin-top:10px;padding:10px;">Cancel</button>
+        <button class="btn btn-ghost" id="raCancel" data-nav style="width:100%;margin-top:10px;padding:10px;justify-content:center;text-align:center;">Cancel</button>
       </div>`;
 
     const err = host.querySelector('#raErr');

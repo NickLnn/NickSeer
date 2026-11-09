@@ -103,13 +103,7 @@ function render(firstRun) {
     <div class="settings-modal-card">
       <div class="settings-hub-head">
         <div class="settings-hub-brand">
-          <span class="brand-mark">
-            <svg viewBox="0 0 64 64" width="28" height="28">
-              <defs><linearGradient id="sm" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2E9BD6"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs>
-              <rect width="64" height="64" rx="14" fill="url(#sm)"/>
-              <path d="M20 46V18h6l12 16V18h6v28h-6L26 30v16z" fill="#fff"/>
-            </svg>
-          </span>
+          <span class="brand-mark" style="width:28px;height:28px"></span>
           <div>
             <h2 class="settings-hub-title">${firstRun ? 'Welcome to NickSeer Setup' : 'NickSeer Settings'}</h2>
             <p class="settings-hub-sub">${firstRun ? 'Connect your services. Stored securely on your NAS only.' : 'Configure your integrations, media servers, and downloaders.'}</p>

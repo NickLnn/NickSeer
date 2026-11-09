@@ -48,6 +48,15 @@ function injectStyles() {
   .stat-mini{width:34px;height:51px;border-radius:5px;object-fit:cover;background:#22222e;flex:0 0 auto;}
   .stat-mini.ph{display:grid;place-items:center;font-size:15px;}
   .stat-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#eaeaf0;font-weight:600;}
+  .stat-av-wrap{flex:0 0 auto;display:grid;width:34px;height:34px;}
+  .stat-av-wrap>*{grid-area:1/1;}
+  .stat-av-wrap>img{z-index:1;}
+  .stat-av{width:34px;height:34px;border-radius:50%;object-fit:cover;flex:0 0 auto;background:#22222e;}
+  .stat-av.ini{display:grid;place-items:center;font-weight:800;font-size:15px;color:#fff;background:hsl(var(--h,250),45%,38%);}
+  .stat-plat{flex:0 0 auto;width:34px;height:34px;border-radius:9px;display:grid;place-items:center;font-size:10.5px;font-weight:900;letter-spacing:.02em;color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);overflow:hidden;}
+  .stat-plat.long{font-size:8.5px;letter-spacing:0;}
+  .stat-plat>*{grid-area:1/1;}
+  .stat-plat-logo{width:100%;height:100%;box-sizing:border-box;padding:8px;object-fit:contain;display:grid;place-items:center;z-index:1;background:inherit;}
   .stat-plays{color:#9aa0ad;font-size:12.5px;font-weight:700;flex:0 0 auto;}
   .live-card[data-key]{cursor:pointer;transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease;}
   .live-card[data-key]:hover,.live-card[data-key]:focus-visible{transform:translateY(-2px);border-color:color-mix(in srgb,var(--accent,#e50914) 55%,transparent);box-shadow:0 10px 30px rgba(0,0,0,.35);outline:none;}
@@ -930,6 +939,51 @@ async function renderNow(root) {
   root.appendChild(grid);
 }
 
+// Coloured initial, hue hashed from the name so each user keeps their colour.
+function initialAvatar(name) {
+  let h = 0; for (const ch of String(name || '?')) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return `<span class="stat-av ini" style="--h:${h}">${escHTML(String(name || '?').trim().slice(0, 1).toUpperCase())}</span>`;
+}
+function userAvatar(name, thumb) {
+  if (!thumb || !/^https?:\/\//.test(thumb)) return initialAvatar(name);
+  // If the Plex avatar fails to load, the hidden initial underneath takes over.
+  return `<span class="stat-av-wrap"><img class="stat-av" src="${escHTML(thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">${initialAvatar(name)}</span>`;
+}
+// Platform badge with the platform's real logo (Simple Icons, CC0, served by
+// cdn.simpleicons.org in the colour we ask for) on its brand colour. Brands
+// Simple Icons no longer carries (Microsoft, Amazon) get a drawn mark or a
+// brand-coloured name. If the logo can't load, the text label underneath shows.
+const WIN_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="#fff"><path d="M0 0h11.3v11.3H0zM12.7 0H24v11.3H12.7zM0 12.7h11.3V24H0zM12.7 12.7H24V24H12.7z"/></svg>';
+const PLATFORMS = [
+  [/webos|\blg\b/i, 'LG', '#A50034', 'lg'],
+  [/tizen|samsung/i, 'SAM', '#1428A0', 'samsung'],
+  [/google ?tv|android ?tv/i, 'GTV', '#1A73E8', 'googletv'],
+  [/shield|nvidia/i, 'NV', '#76B900', 'nvidia'],
+  [/android/i, 'AND', '#2E7D32', 'android'],
+  [/tvos|apple ?tv/i, 'tv', '#000000', 'appletv'],
+  [/ios|iphone|ipad|apple/i, 'iOS', '#000000', 'apple'],
+  [/roku/i, 'ROKU', '#6F1AB1', 'roku'],
+  [/xbox/i, 'XBOX', '#107C10', null],
+  [/playstation|ps[345]/i, 'PS', '#003791', 'playstation'],
+  [/fire ?tv|amazon|\bfire\b/i, 'fire tv', '#FF9900', null],
+  [/windows/i, 'WIN', '#0078D4', 'svg:win'],
+  [/mac ?os|\bmac\b|osx/i, 'MAC', '#000000', 'macos'],
+  [/linux/i, 'LNX', '#333333', 'linux'],
+  [/chrome/i, 'WEB', '#4285F4', 'googlechrome'],
+  [/firefox/i, 'FF', '#FF7139', 'firefox'],
+  [/safari/i, 'SAF', '#006CFF', 'safari'],
+  [/plex/i, 'PLEX', '#1F1F1F', 'plex'],
+  [/kodi/i, 'KODI', '#17B2E7', 'kodi'],
+  [/web|browser|edge/i, 'WEB', '#2E9BD6', null]
+];
+function platformBadge(name) {
+  const hit = PLATFORMS.find(([re]) => re.test(String(name || '')));
+  const [, label, color, logo] = hit || [null, String(name || '?').slice(0, 3).toUpperCase(), '#4a4f5c', null];
+  const art = logo === 'svg:win' ? `<span class="stat-plat-logo">${WIN_SVG}</span>`
+    : logo ? `<img class="stat-plat-logo" src="https://cdn.simpleicons.org/${logo}/white" alt="" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">` : '';
+  return `<span class="stat-plat${label.length > 4 ? ' long' : ''}" style="background:${color}" title="${escHTML(name || '')}"><b>${escHTML(label)}</b>${art}</span>`;
+}
+
 async function renderStats(root) {
   const d = await api(`/api/discover/live/stats?days=${statDays}`);
   if (d.error) { root.insertAdjacentHTML('beforeend', `<div class="live-empty">${escHTML(d.error)}</div>`); return; }
@@ -940,8 +994,10 @@ async function renderStats(root) {
     const t = { name: r.name, year: r.year, media, poster: r.poster, tmdbId: r.id, tmdbMedia: r.media, ratingKey: media === 'movie' ? r.ratingKey : null, showKey: media === 'tv' ? r.ratingKey : null };
     return item(i, art, r, r.ratingKey ? reg('title', t) : '');
   };
-  const userRow = (r, i) => item(i, '<div class="stat-mini ph">👤</div>', r, r.userId != null ? reg('user', { userId: r.userId, name: r.name, thumb: r.thumb }) : '');
-  const platRow = (r, i) => item(i, '<div class="stat-mini ph">🖥️</div>', r, '');
+  // Plex avatar when Tautulli has one (falls back to a coloured initial if the
+  // image fails to load), instead of the same 👤 for everybody.
+  const userRow = (r, i) => item(i, userAvatar(r.name, r.thumb), r, r.userId != null ? reg('user', { userId: r.userId, name: r.name, thumb: r.thumb }) : '');
+  const platRow = (r, i) => item(i, platformBadge(r.name), r, '');
   const wrap = document.createElement('div'); wrap.className = 'stat-cols';
   wrap.innerHTML = col('🎬 Top Movies', d.topMovies, titleRow('movie')) + col('📺 Top TV', d.topTv, titleRow('tv')) + col('👤 Top Users', d.topUsers, userRow) + col('🖥️ Top Platforms', d.topPlatforms, platRow);
   root.appendChild(wrap);

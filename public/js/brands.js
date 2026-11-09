@@ -238,6 +238,7 @@ function scan(root = document) {
 }
 
 // Generates the mini, minimal high-quality official streaming pill for detail modal
+const ICON_ONLY = new Set(['paramount']);
 export function renderStreamPill(stream) {
   if (!stream || (!stream.key && !stream.name && !stream.logo)) return null;
   let key = stream.key || '';
@@ -250,6 +251,9 @@ export function renderStreamPill(stream) {
 
   if (MINI_SVGS[key]) {
     pill.innerHTML = MINI_SVGS[key];
+    // Icon-only marks (no wordmark in the SVG) get the service name beside
+    // them, otherwise e.g. Paramount+ was a lone mountain on a blue blob.
+    if (ICON_ONLY.has(key)) pill.insertAdjacentHTML('beforeend', `<span class="stream-text">${name}</span>`);
   } else if (stream.logo) {
     const img = document.createElement('img');
     img.src = stream.logo;
