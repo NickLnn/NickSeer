@@ -1471,7 +1471,11 @@ export async function openDetail(item) {
   }
       let reqBtn;
     if (d.inLibrary) {
-      reqBtn = el('button', { class: 'btn btn-owned', 'data-nav': '', disabled: true, style: 'opacity:0.8;cursor:default;background:rgba(53,208,127,.18);color:#35d07f;border:1px solid rgba(53,208,127,.4)' }, [el('span',{},'✔'), '  In Library']);
+      // Opens the library sheet (files, tracks, subtitles) when Plex gave us the item's key.
+      const libKey = d.libraryKey;
+      reqBtn = libKey
+        ? el('button', { class: 'btn btn-owned', 'data-nav': '', title: 'Show files, audio tracks and subtitles', style: 'cursor:pointer;background:rgba(53,208,127,.18);color:#35d07f;border:1px solid rgba(53,208,127,.4)', onclick: () => window.openLibraryInfo && window.openLibraryInfo({ key: libKey, media, title: d.title, year: d.year, poster: d.poster, backdrop: d.backdrop }) }, [el('span',{},'✔'), '  In Library', el('span', { style: 'margin-left:8px;font-size:12px;opacity:.85' }, 'ⓘ')])
+        : el('button', { class: 'btn btn-owned', 'data-nav': '', disabled: true, style: 'opacity:0.8;cursor:default;background:rgba(53,208,127,.18);color:#35d07f;border:1px solid rgba(53,208,127,.4)' }, [el('span',{},'✔'), '  In Library']);
     } else if (d.isRequested) {
       reqBtn = el('button', { class: 'btn btn-requested', 'data-nav': '', disabled: true, style: 'opacity:0.85;cursor:default;background:rgba(245,197,24,.18);color:#f5c518;border:1px solid rgba(245,197,24,.45)' }, [el('span',{},'⏳'), '  Requested']);
     } else {

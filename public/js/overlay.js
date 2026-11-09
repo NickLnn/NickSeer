@@ -9,7 +9,7 @@
 // Everything here is imported by the same unversioned specifier from every
 // caller, so there is exactly one instance.
 
-const OVERLAY_IDS = ['modal', 'requestModal', 'plexModal', 'profileOverlay', 'streamModal', 'liveSheet'];
+const OVERLAY_IDS = ['modal', 'requestModal', 'plexModal', 'profileOverlay', 'streamModal', 'liveSheet', 'libInfo'];
 
 export function anyOverlayOpen() {
   return OVERLAY_IDS.some((id) => {

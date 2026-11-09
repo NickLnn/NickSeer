@@ -401,6 +401,46 @@ await test('malformed tokens are rejected without throwing', () => {
   });
 }
 
+// --- Title modal › In Library (Plex file details) ----------------------------
+{
+  const P = await import('../server/services/plex.js');
+  const movie = {
+    ratingKey: '42', type: 'movie', title: 'Gemini Man', year: 2019,
+    Media: [{ videoResolution: '4k', videoCodec: 'hevc', Part: [{ file: '/data/media/movies/Gemini Man (2019)/Gemini Man.mkv', size: 100,
+      Stream: [
+        { streamType: 1, codec: 'hevc', DOVIPresent: true, colorTrc: 'smpte2084' },
+        { streamType: 2, codec: 'truehd', channels: 8, language: 'English', default: true },
+        { streamType: 3, codec: 'pgs', language: 'English', forced: true },
+        { streamType: 3, codec: 'srt', language: 'Greek', key: '/library/streams/9', hearingImpaired: true }
+      ] }] }]
+  };
+
+  await test('mapItem never exposes the NAS path, only the file name', async () => {
+    const d = P.mapItem(movie);
+    assert.equal(d.versions[0].parts[0].file, 'Gemini Man.mkv');
+    assert.ok(!JSON.stringify(d).includes('/data/media'));
+  });
+
+  await test('mapItem classifies subtitles: image vs text, embedded vs external, forced, SDH', async () => {
+    const [pgs, srt] = P.mapItem(movie).versions[0].subtitles;
+    assert.deepEqual([pgs.image, pgs.external, pgs.forced], [true, false, true]);
+    assert.deepEqual([srt.image, srt.external, srt.hearingImpaired, srt.language], [false, true, true, 'Greek']);
+  });
+
+  await test('mapItem labels Dolby Vision with an HDR10 base layer', async () => {
+    assert.equal(P.mapItem(movie).versions[0].video[0].dynamicRange, 'Dolby Vision · HDR10');
+  });
+
+  await test('mapShow groups episodes by season and totals the size', async () => {
+    const ep = (s, e, size, res) => ({ ratingKey: `${s}${e}`, parentIndex: s, index: e, Media: [{ videoResolution: res, videoCodec: 'h264', Part: [{ size }] }] });
+    const d = P.mapShow({ ratingKey: '7', type: 'show', title: 'Lupin', viewedLeafCount: 1 }, [ep(2, 1, 30, '4k'), ep(1, 2, 20, '1080'), ep(1, 1, 10, '1080')]);
+    assert.equal(d.seasonCount, 2); assert.equal(d.episodes, 3); assert.equal(d.totals.size, 60);
+    assert.deepEqual(d.seasons[0].episodes.map((e) => e.episode), [1, 2]);
+    assert.equal(d.seasons[0].size, 30);
+    assert.deepEqual(d.totals.resolutions, { 1080: 2, '4k': 1 });
+  });
+}
+
 // --- report -----------------------------------------------------------------
 
 console.log('\n' + results.join('\n'));

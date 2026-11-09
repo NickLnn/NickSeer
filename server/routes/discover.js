@@ -464,6 +464,14 @@ function tmdbDetails(media, id) {
   return promise;
 }
 
+// Title modal › In Library: the files, tracks and subtitles Plex holds.
+router.get('/library/item/:key', async (req, res) => {
+  try { res.json(await plex.itemFiles(req.params.key)); } catch (e) { res.status(200).json({ error: e.message }); }
+});
+router.get('/library/show/:key', async (req, res) => {
+  try { res.json(await plex.showFiles(req.params.key)); } catch (e) { res.status(200).json({ error: e.message }); }
+});
+
 router.get('/:media/:id', async (req, res) => {
   const { media, id } = req.params;
   try {
@@ -530,6 +538,7 @@ router.get('/:media/:id', async (req, res) => {
       inLibrary: !!owned,
       isRequested: isRequested && !owned,
       plexUrl,
+      libraryKey: owned?.ratingKey || null,
       libraryServer: owned?.server || 'Plex',
       librarySection: owned?.section || '',
       status: d.status || null,

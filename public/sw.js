@@ -2,7 +2,7 @@
 // Implements instant offline launch, Stale-While-Revalidate caching,
 // and resilient shell fallback for home screen standalone apps.
 
-const CACHE_NAME = 'nickseer-pwa-v3.7';
+const CACHE_NAME = 'nickseer-pwa-v3.8';
 
 const PRECACHE_SHELL = [
   '/',

@@ -291,6 +291,75 @@ function liveStats() {
   };
 }
 
+
+// Title modal › In Library fixtures, in RAW Plex /library/metadata shape and
+// fed through the real mapItem/mapShow in server/services/plex.js (pure; the
+// module only reads config when it actually calls Plex). Movie keys alternate
+// between a single 4K DV remux (image + text + external subs, TrueHD) and a
+// two-version title (4K HEVC + 1080p H.264). Episode keys are 8xxxxxx.
+const PLEX = await import('../../server/services/plex.js');
+const pStream = (type, o) => ({ streamType: type, ...o });
+function plexMovie(key, title) {
+  const remux = {
+    id: 1, videoResolution: '4k', width: 3840, height: 1608, bitrate: 58200, container: 'mkv', duration: 7020000,
+    videoCodec: 'hevc', audioCodec: 'truehd', audioChannels: 8, videoFrameRate: '24p', aspectRatio: 2.39,
+    Part: [{ file: `/data/media/movies/${title} (2019)/${title} (2019) [Remux-2160p][DV HDR10][TrueHD Atmos 7.1].mkv`, size: 51539607552, container: 'mkv', duration: 7020000,
+      Stream: [
+        pStream(1, { codec: 'hevc', profile: 'main 10', width: 3840, height: 1608, bitrate: 52000, bitDepth: 10, frameRate: 23.976, DOVIPresent: true, DOVIProfile: 8, colorTrc: 'smpte2084', colorPrimaries: 'bt2020', chromaSubsampling: '4:2:0', scanType: 'progressive', displayTitle: '4K DoVi/HDR10 (HEVC Main 10)' }),
+        pStream(2, { codec: 'truehd', profile: 'atmos', channels: 8, audioChannelLayout: '7.1', bitrate: 5100, samplingRate: 48000, language: 'English', languageCode: 'eng', default: true, title: 'Dolby TrueHD Atmos' }),
+        pStream(2, { codec: 'ac3', channels: 6, audioChannelLayout: '5.1(side)', bitrate: 640, language: 'English', languageCode: 'eng', title: 'Compatibility' }),
+        pStream(2, { codec: 'eac3', channels: 6, audioChannelLayout: '5.1(side)', bitrate: 768, language: 'Greek', languageCode: 'ell' }),
+        pStream(3, { codec: 'pgs', language: 'English', languageCode: 'eng', default: true }),
+        pStream(3, { codec: 'pgs', language: 'English', languageCode: 'eng', forced: true, title: 'Forced' }),
+        pStream(3, { codec: 'srt', language: 'English', languageCode: 'eng', hearingImpaired: true, title: 'SDH' }),
+        pStream(3, { codec: 'srt', language: 'Greek', languageCode: 'ell', key: '/library/streams/991' }),
+        pStream(3, { codec: 'ass', language: 'Spanish', languageCode: 'spa' })
+      ] }]
+  };
+  const hd = {
+    id: 2, videoResolution: '1080', width: 1920, height: 800, bitrate: 9800, container: 'mp4', duration: 7020000,
+    videoCodec: 'h264', audioCodec: 'aac', audioChannels: 2, videoFrameRate: '24p', aspectRatio: 2.39,
+    Part: [{ file: `C:\\Media\\Movies\\${title} (2019)\\${title} (2019) [WEBDL-1080p].mp4`, size: 8589934592, container: 'mp4', duration: 7020000, optimizedForStreaming: 1,
+      Stream: [
+        pStream(1, { codec: 'h264', profile: 'high', width: 1920, height: 800, bitrate: 9400, bitDepth: 8, frameRate: 23.976, colorPrimaries: 'bt709' }),
+        pStream(2, { codec: 'aac', profile: 'lc', channels: 2, audioChannelLayout: 'stereo', bitrate: 256, language: 'English', default: true }),
+        pStream(3, { codec: 'mov_text', language: 'English' })
+      ] }]
+  };
+  const two = Number(key) % 2 === 0;
+  return { ratingKey: String(key), type: 'movie', title, year: 2019, librarySectionTitle: 'Movies', addedAt: 1730000000, viewCount: two ? 0 : 3, lastViewedAt: two ? 0 : 1761000000, Media: two ? [remux, hd] : [remux] };
+}
+function plexEpisode(key) {
+  const s = Math.floor((key - 8000000) / 100), e = (key - 8000000) % 100;
+  return {
+    ratingKey: String(key), type: 'episode', title: `Episode ${e}`, grandparentTitle: 'Sandbox Show', parentIndex: s, index: e, parentTitle: `Season ${s}`,
+    librarySectionTitle: 'TV Shows', addedAt: 1730000000 + key, viewCount: e < 4 ? 1 : 0, duration: 2700000,
+    Media: [{ id: key, videoResolution: s === 1 ? '1080' : '4k', width: s === 1 ? 1920 : 3840, height: s === 1 ? 1080 : 2160, bitrate: s === 1 ? 6200 : 18400, container: 'mkv', duration: 2700000,
+      videoCodec: s === 1 ? 'h264' : 'hevc', audioCodec: 'eac3', audioChannels: 6,
+      Part: [{ file: `/data/tv/Sandbox Show/Season ${s}/Sandbox Show - S0${s}E${String(e).padStart(2, '0')}.mkv`, size: s === 1 ? 2147483648 : 6442450944, container: 'mkv',
+        Stream: [
+          pStream(1, { codec: s === 1 ? 'h264' : 'hevc', width: 1920, height: 1080, bitDepth: s === 1 ? 8 : 10, colorTrc: s === 1 ? 'bt709' : 'smpte2084' }),
+          pStream(2, { codec: 'eac3', channels: 6, audioChannelLayout: '5.1(side)', language: 'English', default: true }),
+          pStream(3, { codec: 'srt', language: 'English', key: '/library/streams/' + key }),
+          pStream(3, { codec: 'srt', language: 'Greek' })
+        ] }] }]
+  };
+}
+function libItem(key) {
+  const k = Number(key);
+  if (k >= 8000000) return PLEX.mapItem(plexEpisode(k));
+  const rec = byId.get(String(k - 7000000));
+  return PLEX.mapItem(plexMovie(k, rec ? rec.title : 'Sandbox Movie'));
+}
+function libShow(key) {
+  const rec = byId.get(String(Number(key) - 7000000));
+  const leaves = [];
+  for (const s of [1, 2]) for (let e = 1; e <= (s === 1 ? 8 : 6); e++) leaves.push(plexEpisode(8000000 + s * 100 + e));
+  // allLeaves carries no Streams — strip them like Plex does.
+  const bare = leaves.map((l) => ({ ...l, Media: l.Media.map((m) => ({ ...m, Part: m.Part.map(({ Stream, ...p }) => p) })) }));
+  return PLEX.mapShow({ ratingKey: String(key), type: 'show', title: rec ? rec.title : 'Sandbox Show', year: 2020, librarySectionTitle: 'TV Shows', addedAt: 1730000000, viewedLeafCount: 6 }, bare);
+}
+
 function escapeXml(s) {
   return String(s).replace(/[<>&'"]/g, (c) => (
     { '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]
@@ -369,6 +438,9 @@ function api(pathname, url, body) {
     return { source: pending ? 'rules' : 'ai', days: 60, basedOn: ['Dune', 'Severance'], items, pending, aiConfigured: true, tuning: { historyDays: 60 } };
   }
 
+  const libm = pathname.match(/^\/api\/discover\/library\/(item|show)\/(\d+)$/);
+  if (libm) return libm[1] === 'show' ? libShow(libm[2]) : libItem(libm[2]);
+
   const detail = pathname.match(/^\/api\/discover\/(movie|tv)\/(\d+)$/);
   if (detail) {
     const rec = byId.get(detail[2]);
@@ -380,6 +452,7 @@ function api(pathname, url, body) {
       // Opt-in (--trailers): embeds a real YouTube iframe, so it needs network.
       trailerKey: process.argv.includes('--trailers') ? 'aqz-KE-bpKQ' : null,
       inLibrary: Number(detail[2]) % 3 === 0,
+      libraryKey: Number(detail[2]) % 3 === 0 ? String(7000000 + Number(detail[2])) : null,
       isRequested: false,
       seriesStatus: detail[1] === 'tv' ? 'ended' : null,
       // Real cast shape (name/photo/character). Every fourth has no headshot so

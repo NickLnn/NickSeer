@@ -273,6 +273,115 @@ export function isMediaInLibrary(map, query = {}) {
   return false;
 }
 
+// ---------------------------------------------------------------------------
+// LIBRARY FILE DETAILS — what the title modal's "In Library" button shows.
+// A single-item /library/metadata/{key} fetch includes every Media version,
+// its Part (file) and all Streams (video / audio / subtitle). List endpoints
+// such as /allLeaves do NOT include Streams, so a show returns a per-episode
+// overview and each episode is fetched on demand for its tracks.
+// Only the file's basename is ever returned — never the NAS path.
+// ---------------------------------------------------------------------------
+const n0 = (v) => { const x = Number(v); return Number.isFinite(x) ? x : 0; };
+const base = (f) => String(f || '').split(/[\\/]/).pop();
+const IMAGE_SUBS = new Set(['pgs', 'hdmv_pgs_subtitle', 'vobsub', 'dvd_subtitle', 'dvdsub', 'dvb_subtitle']);
+function dynamicRange(v) {
+  if (!v) return '';
+  if (v.DOVIPresent || /dolby ?vision|dovi/i.test(v.displayTitle || '')) return v.colorTrc === 'smpte2084' || /hdr10/i.test(v.displayTitle || '') ? 'Dolby Vision · HDR10' : 'Dolby Vision';
+  if (v.colorTrc === 'smpte2084') return /hdr10\+/i.test(v.displayTitle || '') ? 'HDR10+' : 'HDR10';
+  if (v.colorTrc === 'arib-std-b67') return 'HLG';
+  return 'SDR';
+}
+function streamsOf(media) {
+  const all = (media.Part || []).flatMap((p) => p.Stream || []);
+  const video = all.filter((s) => s.streamType === 1).map((s) => ({
+    codec: String(s.codec || '').toUpperCase(), title: s.extendedDisplayTitle || s.displayTitle || '',
+    profile: s.profile || '', level: s.level || '', width: n0(s.width), height: n0(s.height),
+    bitrate: n0(s.bitrate), bitDepth: n0(s.bitDepth), fps: s.frameRate ? String(s.frameRate) : '',
+    dynamicRange: dynamicRange(s), doviProfile: s.DOVIProfile || '', chroma: s.chromaSubsampling || '',
+    scan: s.scanType || '', primaries: s.colorPrimaries || ''
+  }));
+  const audio = all.filter((s) => s.streamType === 2).map((s) => ({
+    codec: String(s.codec || '').toUpperCase(), title: s.extendedDisplayTitle || s.displayTitle || '',
+    language: s.language || s.languageTag || '', code: s.languageCode || '', channels: n0(s.channels),
+    layout: s.audioChannelLayout || '', profile: s.profile || '', bitrate: n0(s.bitrate),
+    sampleRate: n0(s.samplingRate), default: !!s.default, label: s.title || ''
+  }));
+  const subtitles = all.filter((s) => s.streamType === 3).map((s) => {
+    const codec = String(s.codec || '').toLowerCase();
+    return {
+      codec: codec.toUpperCase(), title: s.extendedDisplayTitle || s.displayTitle || '',
+      language: s.language || s.languageTag || 'Unknown', code: s.languageCode || '',
+      label: s.title || '', forced: !!s.forced, default: !!s.default, hearingImpaired: !!s.hearingImpaired,
+      // A stream with its own key is a sidecar file next to the video (.srt etc).
+      external: !!s.key, image: IMAGE_SUBS.has(codec)
+    };
+  });
+  return { video, audio, subtitles };
+}
+function versionOf(m) {
+  const parts = (m.Part || []).map((p) => ({ file: base(p.file), size: n0(p.size), container: String(p.container || '').toUpperCase(), duration: n0(p.duration), optimized: !!p.optimizedForStreaming }));
+  return {
+    id: m.id, resolution: m.videoResolution || '', width: n0(m.width), height: n0(m.height),
+    bitrate: n0(m.bitrate), container: String(m.container || '').toUpperCase(), duration: n0(m.duration),
+    videoCodec: String(m.videoCodec || '').toUpperCase(), audioCodec: String(m.audioCodec || '').toUpperCase(),
+    audioChannels: n0(m.audioChannels), fps: m.videoFrameRate || '', aspect: m.aspectRatio || '',
+    edition: m.editionTitle || '', size: parts.reduce((a, p) => a + p.size, 0), parts, ...streamsOf(m)
+  };
+}
+function itemMeta(it) {
+  return {
+    ratingKey: it.ratingKey, type: it.type, title: it.title, year: it.year || '',
+    show: it.grandparentTitle || '', season: n0(it.parentIndex), episode: n0(it.index),
+    edition: it.editionTitle || '', section: it.librarySectionTitle || '',
+    addedAt: n0(it.addedAt), updatedAt: n0(it.updatedAt), lastViewedAt: n0(it.lastViewedAt),
+    viewCount: n0(it.viewCount), duration: n0(it.duration), contentRating: it.contentRating || '', studio: it.studio || ''
+  };
+}
+
+export async function itemFiles(ratingKey) {
+  if (!/^\d+$/.test(String(ratingKey))) throw new Error('bad library key');
+  const it = (await call(`/library/metadata/${ratingKey}`))?.MediaContainer?.Metadata?.[0];
+  if (!it) throw new Error('not found in Plex');
+  return mapItem(it);
+}
+export function mapItem(it) { return { ...itemMeta(it), versions: (it.Media || []).map(versionOf) }; }
+
+export async function showFiles(ratingKey) {
+  if (!/^\d+$/.test(String(ratingKey))) throw new Error('bad library key');
+  const [show, leaves] = await Promise.all([
+    call(`/library/metadata/${ratingKey}`).then((d) => d?.MediaContainer?.Metadata?.[0]),
+    call(`/library/metadata/${ratingKey}/allLeaves`).then((d) => d?.MediaContainer?.Metadata || [])
+  ]);
+  if (!show) throw new Error('not found in Plex');
+  return mapShow(show, leaves);
+}
+export function mapShow(show, leaves) {
+  const seasons = new Map();
+  const tally = { size: 0, resolutions: {}, videoCodecs: {}, audioCodecs: {} };
+  for (const ep of leaves) {
+    const m = (ep.Media || [])[0] || {};
+    const size = (ep.Media || []).flatMap((x) => x.Part || []).reduce((a, p) => a + n0(p.size), 0);
+    const row = {
+      ratingKey: ep.ratingKey, season: n0(ep.parentIndex), episode: n0(ep.index), title: ep.title || '',
+      resolution: m.videoResolution || '', videoCodec: String(m.videoCodec || '').toUpperCase(),
+      audioCodec: String(m.audioCodec || '').toUpperCase(), audioChannels: n0(m.audioChannels),
+      container: String(m.container || '').toUpperCase(), bitrate: n0(m.bitrate), duration: n0(ep.duration || m.duration),
+      size, versions: (ep.Media || []).length, viewCount: n0(ep.viewCount), addedAt: n0(ep.addedAt)
+    };
+    tally.size += size;
+    const bump = (o, k) => { if (k) o[k] = (o[k] || 0) + 1; };
+    bump(tally.resolutions, row.resolution); bump(tally.videoCodecs, row.videoCodec); bump(tally.audioCodecs, row.audioCodec);
+    if (!seasons.has(row.season)) seasons.set(row.season, { season: row.season, title: ep.parentTitle || `Season ${row.season}`, episodes: [] });
+    seasons.get(row.season).episodes.push(row);
+  }
+  const list = [...seasons.values()].sort((a, b) => a.season - b.season);
+  list.forEach((s) => { s.episodes.sort((a, b) => a.episode - b.episode); s.size = s.episodes.reduce((a, e) => a + e.size, 0); });
+  return {
+    ...itemMeta(show), episodes: leaves.length, watchedEpisodes: n0(show.viewedLeafCount), seasonCount: list.length,
+    totals: tally, seasons: list
+  };
+}
+
 // Cache both the map and detail together (one scan feeds both).
 async function scanCached(force) { return cached('plex:scan', TTL_DAY, scan, force); }
 
@@ -309,7 +418,7 @@ export async function forceScan() {
   return { ok: true, triggered: scanned, detail };
 }
 
-export default { test, testWithSections, sections, history, libraryMap, libraryTmdbIds, libraryDetail, invalidateLibrary, forceScan, isMediaInLibrary, normalizeTitle };
+export default { itemFiles, showFiles, test, testWithSections, sections, history, libraryMap, libraryTmdbIds, libraryDetail, invalidateLibrary, forceScan, isMediaInLibrary, normalizeTitle };
 
 
 
