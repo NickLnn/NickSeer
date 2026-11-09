@@ -99,6 +99,17 @@ const CSS = `
 // ---------- formatting ----------
 const fmtSize = (b) => (!b ? '—' : b >= 1099511627776 ? `${(b / 1099511627776).toFixed(2)} TB` : b >= 1073741824 ? `${(b / 1073741824).toFixed(2)} GB` : `${Math.round(b / 1048576)} MB`);
 const fmtRate = (k) => (!k ? '' : k >= 1000 ? `${(k / 1000).toFixed(1)} Mbps` : `${Math.round(k)} kbps`);
+// Download speed a remote viewer needs to Direct Play: Plex reports the
+// AVERAGE bitrate and action scenes in a remux peak well above it, so allow
+// ~1.5x headroom, rounded up to the next 5 Mbps.
+const needMbps = (kbps) => Math.max(5, Math.ceil((kbps * 1.5) / 1000 / 5) * 5);
+// The internet plan that comfortably covers that, in the tiers ISPs sell
+// (e.g. Cosmote: 24 ADSL, 50/100/200 VDSL, 300/500/1000/3000 Fiber). A plan
+// rarely delivers its full speed (Wi-Fi, evening congestion), so only ~80%
+// of it is counted.
+const PLAN_TIERS = [24, 50, 100, 200, 300, 500, 1000, 3000];
+const planFor = (need) => PLAN_TIERS.find((t) => t * 0.8 >= need) || 3000;
+const fmtPlan = (t) => (t >= 1000 ? `${t / 1000} Gbps` : `${t} Mbps`);
 const fmtDur = (ms) => { const m = Math.round((ms || 0) / 60000); return !m ? '' : m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`; };
 const fmtDate = (s) => (s ? new Date(s * 1000).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }) : '');
 const fmtRes = (r) => { const v = String(r || '').toLowerCase(); if (!v) return ''; if (v === '4k' || v === '2160') return '4K'; if (/^\d+$/.test(v)) return v + 'p'; return v.toUpperCase(); };
@@ -217,7 +228,7 @@ function versionHTML(v) {
     ${tile(fmtDur(v.duration), 'Runtime')}
   </div>`;
   const files = (v.parts || []).map((p) => `<div class="li-file">📄 ${escHTML(p.file || 'unknown file')}</div>`).join('');
-  const fileBox = box('📁', 'File', `${files}${kv([['Container', v.container], ['Size', fmtSize(v.size)], ['Overall bitrate', fmtRate(v.bitrate)], ['Parts', (v.parts || []).length > 1 ? String(v.parts.length) : ''], ['Edition', v.edition], ['Optimized for streaming', (v.parts || []).some((p) => p.optimized) ? 'Yes' : '']])}`);
+  const fileBox = box('📁', 'File', `${files}${kv([['Container', v.container], ['Size', fmtSize(v.size)], ['Overall bitrate', fmtRate(v.bitrate)], ['Remote Direct Play needs', v.bitrate ? `≈ ${needMbps(v.bitrate)} Mbps · ${fmtPlan(planFor(needMbps(v.bitrate)))} plan or faster` : ''], ['Parts', (v.parts || []).length > 1 ? String(v.parts.length) : ''], ['Edition', v.edition], ['Optimized for streaming', (v.parts || []).some((p) => p.optimized) ? 'Yes' : '']])}`);
   const videoBox = box('🎞️', 'Video', (v.video || []).length ? (v.video || []).map((s) => kv([
     ['Codec', [s.codec, s.profile ? `(${s.profile})` : ''].filter(Boolean).join(' ')], ['Frame size', s.width ? `${s.width}×${s.height}` : ''],
     ['Dynamic range', s.dynamicRange + (s.doviProfile ? ` · profile ${s.doviProfile}` : '')], ['Bit depth', s.bitDepth ? `${s.bitDepth}-bit` : ''],
@@ -257,8 +268,15 @@ function notesHTML(v) {
   if (/TRUEHD|DTS/.test((v.audio || []).map((a) => a.codec).join(' '))) add('#8b7dff', '🔊', 'Has <b>TrueHD/DTS</b> audio. Many TV apps can\'t play it and Plex converts the audio (cheap, video untouched). Use a receiver or passthrough for the original.');
   if (/HEVC|AV1/.test(v.videoCodec) && fmtRes(v.resolution) === '4K') add('#6aa8ff', '🎞️', `<b>${escHTML(v.videoCodec)} 4K</b> — Direct Plays on modern 4K TVs; older devices and browsers will transcode it.`);
   if (/dolby vision/i.test(vid.dynamicRange || '') && !/hdr10/i.test(vid.dynamicRange)) add('#f5c518', '🌈', '<b>Dolby Vision without an HDR10 layer</b> — non-DV screens will show wrong colours or need tone mapping.');
-  if (fmtRate(v.bitrate) && v.bitrate > 40000) add('#ff6b6b', '📶', `<b>High bitrate (${escHTML(fmtRate(v.bitrate))})</b> — remote viewers with a lower Remote Streaming limit will get a transcode.`);
   if (!out.length) add('#35d07f', '✅', 'Standard formats — this file should Direct Play on almost every device.');
+  // Always last: the connection a remote viewer needs to Direct Play this file.
+  if (v.bitrate) {
+    const need = needMbps(v.bitrate);
+    const plan = fmtPlan(planFor(need));
+    const below = PLAN_TIERS.filter((t) => t * 0.8 < need).pop();
+    if (v.bitrate > 40000) add('#ff6b6b', '📶', `<b>High bitrate (${escHTML(fmtRate(v.bitrate))})</b> — needs about <b>${need} Mbps</b>. A viewer on a <b>${plan}</b> internet plan or faster can watch it untouched${below ? `; on a ${fmtPlan(below)} plan or slower Plex will transcode it` : ''}. Your server's <b>upload</b> must also be at least ${need} Mbps.`);
+    else add('#6aa8ff', '📶', `<b>Remote playback:</b> needs about <b>${need} Mbps</b> (${escHTML(fmtRate(v.bitrate))} average) — any <b>${plan}</b> internet plan or faster plays it untouched. Your server's <b>upload</b> must be at least ${need} Mbps.`);
+  }
   return box('🧠', 'Playback notes', `<div class="li-notes">${out.join('')}</div>`);
 }
 

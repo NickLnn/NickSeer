@@ -1140,6 +1140,14 @@ async function runSearch(q) {
   ]));
   const grid = el('div', { class: 'search-results-grid' });
   results.forEach((it) => grid.appendChild(card(it)));
+  // Search cards are larger than rail cards, so give them a srcset: the
+  // browser picks w500/w780 on high-DPI screens instead of upscaling w342.
+  grid.querySelectorAll('img.card-poster').forEach((im) => {
+    const src = im.getAttribute('src');
+    if (!src || !/\/t\/p\//.test(src)) return;
+    im.srcset = [['w342', 342], ['w500', 500], ['w780', 780]].map(([s, w]) => `${tmdbSized(src, s)} ${w}w`).join(', ');
+    im.sizes = '(max-width: 768px) 32vw, 210px';
+  });
   wrap.appendChild(grid);
   app.appendChild(wrap);
   return true;

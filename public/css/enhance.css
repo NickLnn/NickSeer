@@ -177,8 +177,8 @@ html, body {
 .search-results-head { padding: 10px 40px 14px; }
 .search-results-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 18px;
   padding: 0 40px 80px;
   width: 100%;
   box-sizing: border-box;
@@ -186,7 +186,7 @@ html, body {
 }
 .search-results-grid .card {
   width: 100%;
-  max-width: 170px;
+  max-width: 210px;
   margin: 0;
 }
 
@@ -202,11 +202,11 @@ html, body {
   /* Centered Search Grid on Phone */
   .search-results-head { padding: 8px 16px 10px; }
   .search-results-grid {
-    grid-template-columns: repeat(auto-fill, minmax(102px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
     gap: 10px;
     padding: 0 14px 90px;
   }
-  .search-results-grid .card { max-width: 130px; }
+  .search-results-grid .card { max-width: 150px; }
   
   /* Mobile Detail Modal Fixes (Screenshot 1 Overhaul) */
   .modal {

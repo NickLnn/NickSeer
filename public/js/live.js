@@ -996,10 +996,14 @@ function init() {
   });
   document.addEventListener('nav:back', () => { closeStream(); closeSheet(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeStream(); closeSheet(); } });
-  const obs = new MutationObserver(() => { if (isLiveActive() && !document.getElementById('liveView')) render(); });
+  // Re-draw Live if something wiped #app while the tab is active — but NOT
+  // when that something is a search: app.js owns #app while results (or the
+  // 'No results' state) are showing, and redrawing here erased them.
+  const searching = () => !!document.getElementById('search')?.value.trim();
+  const obs = new MutationObserver(() => { if (isLiveActive() && !searching() && !document.getElementById('liveView')) render(); });
   obs.observe(app() || document.body, { childList: true, subtree: true });
 }
-    if (isLiveActive() && !document.getElementById('liveView')) render();
+    if (isLiveActive() && !document.getElementById('search')?.value.trim() && !document.getElementById('liveView')) render();
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(init, 300));
 else setTimeout(init, 300);
 
