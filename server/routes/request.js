@@ -10,6 +10,7 @@ import collections from '../services/collections.js';
 //   • Login required, approvals toggle ON, requester is NOT admin → queue as pending
 //   • Requester IS admin → always direct-add
 import express from '../mini.js';
+import { logDirect, roleOf } from '../lib/requestlog.js';
 import arr from '../services/arr.js';
 import tautulli from '../services/tautulli.js';
 import plex from '../services/plex.js';
@@ -82,22 +83,26 @@ router.post('/', async (req, res) => {
     if (all.find((r) => r.status === 'pending' && String(r.tmdbId) === String(tmdbId) && r.media === media)) {
       return res.json({ ok: true, code: 'pending', already: true });
     }
-    const rq = { id: crypto.randomUUID(), status: 'pending', media, tmdbId, title: title || '', poster: fullPoster, by: u ? u.username : 'guest', at: Date.now(), qualityProfileId: qualityProfileId || null, rootFolder: rootFolder || '', tags, newTags, seasons };
+    const rq = { id: crypto.randomUUID(), status: 'pending', media, tmdbId, title: title || '', poster: fullPoster, by: u ? u.username : 'guest', byRole: roleOf(u), source: 'app', at: Date.now(), qualityProfileId: qualityProfileId || null, rootFolder: rootFolder || '', tags, newTags, seasons };
       all.unshift(rq);
       setRequests(all);
       telegram.notify('pending', rq); discord.notify('pending', rq);
       return res.json({ ok: true, code: 'pending' });
   }
 
+  // Every direct add is recorded — see server/lib/requestlog.js.
+  const logBase = { media, tmdbId, title: title || '', poster: fullPoster, by: u ? u.username : 'guest', byRole: roleOf(u), source: 'app', seasons };
   try {
     const tagIds = [...tags];
     for (const label of newTags) { if (!label) continue; const id = await arr.ensureTag(kind, label); if (!tagIds.includes(id)) tagIds.push(id); }
     const result = await arr.add(kind, tmdbId, { qualityProfileId: qualityProfileId ? Number(qualityProfileId) : undefined, rootFolder: rootFolder || undefined, tags: tagIds, seasons });
+    logDirect(logBase, { kind: 'added', arrId: result?.id });
     try { plex.invalidateLibrary(); } catch { /* ignore */ }
       telegram.notify('autoApproved', { title, media, tmdbId, poster: fullPoster, by: u ? u.username : 'guest' }); discord.notify('autoApproved', { title, media, tmdbId, poster: fullPoster, by: u ? u.username : 'guest' });
       res.json({ ok: true, kind, id: result.id, title: result.title || result.movie?.title });
   } catch (e) {
-    if (isAlreadyExists(e.message)) { telegram.notify('available', { title, media, tmdbId, poster: fullPoster, by: u ? u.username : 'guest' }); discord.notify('available', { title, media, tmdbId, poster: fullPoster, by: u ? u.username : 'guest' }); return res.status(200).json({ ok: false, code: 'exists', kind, error: `Already added to ${cap(kind)}.` }); }
+    if (isAlreadyExists(e.message)) { logDirect(logBase, { kind: 'exists' }); telegram.notify('available', { title, media, tmdbId, poster: fullPoster, by: u ? u.username : 'guest' }); discord.notify('available', { title, media, tmdbId, poster: fullPoster, by: u ? u.username : 'guest' }); return res.status(200).json({ ok: false, code: 'exists', kind, error: `Already added to ${cap(kind)}.` }); }
+      logDirect(logBase, { kind: 'failed', error: e.message });
       telegram.notify('failed', { title, media, tmdbId, poster: fullPoster, by: u ? u.username : 'guest' }); discord.notify('failed', { title, media, tmdbId, poster: fullPoster, by: u ? u.username : 'guest' });
       res.status(200).json({ ok: false, error: e.message });
   }
@@ -127,6 +132,7 @@ router.post('/collection', async (req, res) => {
     const results = [];
     const allReqs = isQueue ? (load().requests || []) : null;
 
+    const partBase = (part) => ({ media: 'movie', tmdbId: part.id, title: part.title || '', poster: part.poster || '', by: u ? u.username : 'guest', byRole: roleOf(u), source: 'collection', collection: col.name });
     for (const part of missingParts) {
       if (isQueue) {
         if (!allReqs.find(r => r.status === 'pending' && String(r.tmdbId) === String(part.id) && r.media === 'movie')) {
@@ -138,6 +144,8 @@ router.post('/collection', async (req, res) => {
             title: part.title || '',
             poster: part.poster || '',
             by: u ? u.username : 'guest',
+            byRole: roleOf(u),
+            source: 'collection',
             at: Date.now(),
             qualityProfileId: qualityProfileId || null,
             rootFolder: rootFolder || '',
@@ -153,11 +161,14 @@ router.post('/collection', async (req, res) => {
             tags
           });
           results.push({ id: part.id, title: part.title, status: 'added', radarrId: added?.id });
+          logDirect(partBase(part), { kind: 'added', arrId: added?.id });
         } catch (e) {
           if (isAlreadyExists(e.message)) {
             results.push({ id: part.id, title: part.title, status: 'exists' });
+            logDirect(partBase(part), { kind: 'exists' });
           } else {
             results.push({ id: part.id, title: part.title, status: 'error', error: e.message });
+            logDirect(partBase(part), { kind: 'failed', error: e.message });
           }
         }
       }

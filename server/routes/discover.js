@@ -13,6 +13,7 @@ import engine from '../recommend/engine.js';
 import { aiRerank } from '../recommend/ai.js';
 import { load } from '../config.js';
 import { cached, TTL_DAY, TTL_HOUR } from '../lib/cache.js';
+import { twoPhase } from '../lib/twophase.js';
 import { mapLimit } from '../lib/async.js';
 import { allow } from '../lib/ratelimit.js';
 
@@ -222,10 +223,14 @@ router.get('/ai-suggest', async (req, res) => {
   const cfg = load(); const aiOn = cfg.ai?.provider && cfg.ai.provider !== 'none'; const T = tuning();
   try {
     const activeUser = req.user?.username || req.user?.plexId || req.query.userId || 'all';
-    const key = `ai-suggest:v3:${activeUser}:${cfg.ai?.provider || 'none'}:${T.minRating}:${T.minVotes}:${T.maxCandidates}:${T.historyDays}:${T.englishOnly ? 'en' : 'multi'}`;
-    const data = await cached(key, TTL_DAY, async () => {
+    const key = `ai-suggest:v4:${activeUser}:${cfg.ai?.provider || 'none'}:${T.minRating}:${T.minVotes}:${T.maxCandidates}:${T.historyDays}:${T.englishOnly ? 'en' : 'multi'}`;
+    // Two-phase: the rule-based list is returned as soon as the TMDB fan-out is
+    // done; the LLM rerank runs in the background and the client polls for it.
+    // See lib/twophase.js for why (the request used to block on the model).
+    const shape = (cands, seeds, source) => ({ source, days: T.historyDays, basedOn: seeds.slice(0, 6).map((s) => cap(s.title)), items: cands.slice(0, 24).map((c) => ({ ...mini(c), why: c._why })) });
+    const quick = async () => {
       const hist = await recentHistory(T.historyDays, activeUser !== 'all' ? activeUser : undefined);
-      if (!hist.length) return { source: aiOn ? 'ai' : 'rules', items: [], note: 'no-history', days: T.historyDays };
+      if (!hist.length) return { done: true, value: { source: aiOn ? 'ai' : 'rules', items: [], note: 'no-history', days: T.historyDays } };
       const weight = new Map(); const typeOf = new Map();
       for (const h of hist) { const k = (h.grandparentTitle || h.title || '').toLowerCase().trim(); if (!k) continue; weight.set(k, (weight.get(k) || 0) + 1); typeOf.set(k, h.type); }
       const top = [...weight.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
@@ -243,16 +248,67 @@ router.get('/ai-suggest', async (req, res) => {
       ]);
       const pool = new Map();
       for (const { s, lists } of feeds) { for (const list of lists) { for (const c of list) { const id = `${s.media}:${c.id}`; if (owned.has(s.media + ':' + String(c.id))) continue; if ((c.vote_average || 0) < T.minRating) continue; if ((c.vote_count || 0) < T.minVotes) continue; if (c.original_language && !allowedLangs.has(c.original_language)) continue; if (!c.poster_path) continue; if (!pool.has(id)) pool.set(id, { ...c, media: s.media }); } } }
-      let candidates = [...pool.values()].sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0)).slice(0, T.maxCandidates);
-      if (aiOn) { try { candidates = await aiRerank(candidates, seeds); } catch { /* keep */ } }
-      return { source: aiOn ? 'ai' : 'rules', days: T.historyDays, basedOn: seeds.slice(0, 6).map((s) => cap(s.title)), items: candidates.slice(0, 24).map((c) => ({ ...mini(c), why: c._why })) };
-    }, isForce(req));
-    res.json({ ...data, aiConfigured: aiOn, tuning: T });
+      const candidates = [...pool.values()].sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0)).slice(0, T.maxCandidates);
+      const value = shape(candidates, seeds, 'rules');
+      return (aiOn && candidates.length) ? { value, ctx: { candidates, seeds } } : { done: true, value };
+    };
+    // aiRerank() swallows its own failures and hands the list back untouched,
+    // so "did the model answer" has to be read off the result: a real rerank
+    // stamps `_why` on its picks.
+    const refine = async ({ candidates, seeds }) => {
+      const ranked = await aiRerank(candidates.map((c) => ({ ...c })), seeds);
+      const ok = ranked.some((c) => c._why);
+      return { ok, value: shape(ranked, seeds, ok ? 'ai' : 'rules') };
+    };
+    // wait=1 is for the boot pre-warm only, so it can warm users one at a time
+    // instead of queueing every user's rerank against the model at once.
+    const wait = req.query.wait === '1' && req.headers['x-nickseer-warm'] === '1';
+    const { value, pending } = await twoPhase({ key, ttl: TTL_DAY, quick, refine, force: isForce(req), wait });
+    res.json({ ...value, pending, aiConfigured: aiOn, tuning: T });
   } catch (e) { res.status(200).json({ error: e.message, items: [], aiConfigured: aiOn }); }
 });
 
-router.get('/live/now', async (req, res) => { const c = load(); if (!c.services.tautulli?.url || !c.services.tautulli?.apikey) return res.status(200).json({ error: 'Tautulli not configured', sessions: [] }); try { const data = await tautulli.activity(); await mapLimit(data.sessions, FANOUT, async (s) => { const m = await posterFor(s.grandparent || s.title, s.year, s.type === 'episode' ? 'tv' : (s.type || 'multi')); s.poster = m?.poster || null; s.tmdbId = m?.id || null; }); res.json(data); } catch (e) { res.status(200).json({ error: e.message, sessions: [] }); } });
-router.get('/live/stats', async (req, res) => { const c = load(); if (!c.services.tautulli?.url || !c.services.tautulli?.apikey) return res.status(200).json({ error: 'Tautulli not configured' }); const days = [30, 60, 90, 365].includes(Number(req.query.days)) ? Number(req.query.days) : 30; try { const data = await cached(`live:stats:${days}`, TTL_HOUR, async () => { const st = await tautulli.homeStats(days, 10); const enrich = async (rows, media) => { await mapLimit(rows || [], FANOUT, async (r) => { const m = await posterFor(r.name, r.year, media); r.poster = m?.poster || null; r.id = m?.id || null; r.media = m?.media || media; }); return rows; }; await Promise.all([enrich(st.topMovies, 'movie'), enrich(st.topTv, 'tv')]); return st; }, isForce(req)); res.json(data); } catch (e) { res.status(200).json({ error: e.message }); } });
+router.get('/live/now', async (req, res) => { const c = load(); if (!c.services.tautulli?.url || !c.services.tautulli?.apikey) return res.status(200).json({ error: 'Tautulli not configured', sessions: [] }); try { const data = await tautulli.activity(); await mapLimit(data.sessions, FANOUT, async (s) => { const m = await posterFor(s.grandparent || s.title, s.year, s.type === 'episode' ? 'tv' : (s.type || 'multi')); s.poster = m?.poster || null; s.tmdbId = m?.id || null; s.media = m?.media || (s.type === 'episode' ? 'tv' : 'movie'); s.backdrop = m?.backdrop || null; }); res.json(data); } catch (e) { res.status(200).json({ error: e.message, sessions: [] }); } });
+router.get('/live/stats', async (req, res) => { const c = load(); if (!c.services.tautulli?.url || !c.services.tautulli?.apikey) return res.status(200).json({ error: 'Tautulli not configured' }); const days = [30, 60, 90, 365].includes(Number(req.query.days)) ? Number(req.query.days) : 30; try { const data = await cached(`live:stats:v2:${days}`, TTL_HOUR, async () => { const st = await tautulli.homeStats(days, 10); const enrich = async (rows, media) => { await mapLimit(rows || [], FANOUT, async (r) => { const m = await posterFor(r.name, r.year, media); r.poster = m?.poster || null; r.id = m?.id || null; r.media = m?.media || media; }); return rows; }; await Promise.all([enrich(st.topMovies, 'movie'), enrich(st.topTv, 'tv')]); return st; }, isForce(req)); res.json(data); } catch (e) { res.status(200).json({ error: e.message }); } });
+
+// Live › History and the Stats drill-downs. Admin-only, enforced for every
+// /api/discover/live* path in server/index.js.
+const tautulliReady = () => { const c = load(); return !!(c.services.tautulli?.url && c.services.tautulli?.apikey); };
+const liveDays = (v) => ([7, 30, 60, 90, 365].includes(Number(v)) ? Number(v) : 30);
+async function posterRows(rows) {
+  await mapLimit(rows, FANOUT, async (r) => {
+    const m = await posterFor(r.name || r.title, r.ep ? '' : r.year, r.ep || r.media === 'tv' ? 'tv' : 'movie');
+    r.poster = m?.poster || null; r.tmdbId = m?.id || null; r.backdrop = m?.backdrop || null; r.tmdbMedia = m?.media || null;
+  });
+  return rows;
+}
+router.get('/live/history', async (req, res) => {
+  if (!tautulliReady()) return res.status(200).json({ error: 'Tautulli not configured', rows: [] });
+  const q = { days: liveDays(req.query.days), userId: req.query.user, ratingKey: req.query.ratingKey, showKey: req.query.showKey, media: req.query.media, decision: req.query.decision };
+  try {
+    const page = await tautulli.historyQuery({ ...q, start: req.query.start, length: Math.min(100, Number(req.query.length) || 50) });
+    const out = { total: page.total, rows: page.rows };
+    if (req.query.summary === '1') {
+      // Aggregate over the whole window (capped), not just the visible page.
+      const all = page.total <= page.rows.length && !Number(req.query.start) ? page : await tautulli.historyQuery({ ...q, start: 0, length: 1000 });
+      out.summary = tautulli.summarize(all.rows);
+      out.summary.capped = all.total > all.rows.length;
+      out.summary.titleCount = out.summary.titles.length;
+      out.summary.titles = out.summary.titles.slice(0, 12);
+      await posterRows(out.summary.titles);
+    }
+    await posterRows(out.rows);
+    res.json(out);
+  } catch (e) { res.status(200).json({ error: e.message, rows: [] }); }
+});
+router.get('/live/play/:rowId', async (req, res) => {
+  if (!tautulliReady()) return res.status(200).json({ error: 'Tautulli not configured' });
+  try { res.json({ detail: await tautulli.playDetail(req.params.rowId) }); } catch (e) { res.status(200).json({ error: e.message }); }
+});
+router.get('/live/users', async (req, res) => {
+  if (!tautulliReady()) return res.status(200).json({ error: 'Tautulli not configured', users: [] });
+  try { res.json({ users: await cached('live:users', TTL_HOUR, () => tautulli.userList(), isForce(req)) }); } catch (e) { res.status(200).json({ error: e.message, users: [] }); }
+});
 
 router.get('/new', async (req, res) => { const media = req.query.media === 'tv' ? 'tv' : 'movie'; try { const data = await cached(`new:${media}`, TTL_DAY, async () => { const settled = await Promise.allSettled(tmdb.STREAMING.map((s) => tmdb.newlyAdded(s.key, media, 20))); const rows = []; settled.forEach((r, i) => { if (r.status === 'fulfilled' && r.value.items.length) rows.push({ title: `New on ${r.value.provider}`, kind: media, brand: tmdb.STREAMING[i].key, items: r.value.items.map(mini) }); }); return { rows }; }, isForce(req)); res.json(data); } catch (e) { res.status(200).json({ error: e.message, rows: [] }); } });
 
@@ -381,11 +437,38 @@ router.get('/collection/:id', async (req, res) => {
   }
 });
 
+// TMDB details were fetched fresh on EVERY sheet open — tmdb.details() has no
+// cache, so re-opening a title, or two people opening tonight's trending pick,
+// each paid a full upstream round trip while the sheet sat on "Loading…".
+// Only the TMDB half is cached; library / requested state is still resolved
+// per request below, so ownership badges never go stale.
+//
+// A small bounded LRU rather than lib/cache.js: that store only evicts an
+// expired key when it is read again, and these payloads are ~50-100KB each
+// with one key per title ever opened.
+const DETAIL_TTL = TTL_HOUR;
+const DETAIL_MAX = 150;
+const detailCache = new Map();        // `${media}:${id}` -> { at, promise }
+function tmdbDetails(media, id) {
+  const k = `${media}:${id}`;
+  const hit = detailCache.get(k);
+  if (hit && Date.now() - hit.at < DETAIL_TTL) {
+    detailCache.delete(k); detailCache.set(k, hit);   // refresh LRU position
+    return hit.promise;
+  }
+  // Caching the promise also collapses concurrent opens of the same title.
+  const promise = tmdb.details(media, id);
+  detailCache.set(k, { at: Date.now(), promise });
+  promise.catch(() => { if (detailCache.get(k)?.promise === promise) detailCache.delete(k); });
+  while (detailCache.size > DETAIL_MAX) detailCache.delete(detailCache.keys().next().value);
+  return promise;
+}
+
 router.get('/:media/:id', async (req, res) => {
   const { media, id } = req.params;
   try {
     const kind = media === 'tv' ? 'sonarr' : 'radarr';
-    const [d, map] = await Promise.all([tmdb.details(media, id), libMap()]);
+    const [d, map] = await Promise.all([tmdbDetails(media, id), libMap()]);
 
     const titleNorm = (d.title || d.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
     const isMonitored = await arr.isMonitored(kind, {

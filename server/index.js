@@ -179,6 +179,22 @@ async function prewarm(reason) {
     if (r.status === 'rejected') console.warn(`[warm] ${tasks[i][0]} failed: ${r.reason?.message}`);
   });
   console.log(`[warm] ${reason} pre-warm finished in ${Date.now() - t0}ms`);
+
+  // AI Suggestions was never warmed, so the first open of the day ran the whole
+  // pipeline — including the LLM rerank — while the user watched an empty page.
+  // Done AFTER the rest (it shares TMDB with the Home fan-out above) and one
+  // user at a time: `wait=1` holds each request until that user's rerank has
+  // landed, so a slow local model is never asked to serve several at once.
+  // Not awaited by callers that only care about the main warm-up timing.
+  const t1 = Date.now();
+  const aiUsers = [null, ...authSvc.listUsers().map((u) => u.username)].slice(0, 13);
+  for (const u of aiUsers) {
+    try {
+      const q = u ? `&userId=${encodeURIComponent(u)}` : '';
+      await fetch(`${base}/api/discover/ai-suggest?wait=1${q}`, { headers: { 'x-api-key': key, 'x-nickseer-warm': '1' } });
+    } catch (e) { console.warn(`[warm] ai-suggest for ${u || 'all'} failed: ${e.message}`); }
+  }
+  console.log(`[warm] ${reason} ai-suggest warm finished in ${Date.now() - t1}ms (${aiUsers.length} users)`);
 }
 
 // ---------------------------------------------------------------------------

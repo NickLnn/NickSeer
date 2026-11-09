@@ -10,6 +10,31 @@ function authHeaders() { const t = token(); return t ? { Authorization: 'Bearer 
 async function api(path, opts = {}) { try { const r = await fetch(path, { headers: { 'Content-Type': 'application/json', ...authHeaders() }, ...opts }); return await r.json(); } catch (e) { return { error: e.message }; } }
 
 let optionsCache = {};
+// Where a request came from, who approved it, and what Radarr/Sonarr said.
+// Every add is now logged (server/lib/requestlog.js), including admin and
+// Discord requests that used to leave no trace — so the answer to "who added
+// this, when, from where" is on the row itself.
+const SOURCE_LABEL = { app: 'NickSeer app', collection: 'Collection batch', discord: 'Discord (Requestrr)' };
+function roleTag(r) {
+  if (r.byRole === 'admin') return ' <span class="appr-role appr-role-admin">admin</span>';
+  if (r.byRole === 'external') return ' <span class="appr-role">unlinked</span>';
+  return '';
+}
+function provenance(r) {
+  const bits = [];
+  if (r.source) bits.push('via ' + escHTML(SOURCE_LABEL[r.source] || r.source));
+  if (r.collection) bits.push('from ' + escHTML(r.collection));
+  if (r.source === 'discord') {
+    bits.push(r.external
+      ? 'Requestrr user #' + escHTML(r.external)
+      : 'no Requestrr user sent');
+  }
+  if (r.decidedBy && r.decidedBy !== 'auto' && r.status !== 'pending') bits.push('decided by ' + escHTML(r.decidedBy));
+  if (r.decidedBy === 'auto') bits.push('no approval needed');
+  if (r.error) bits.push('<span style="color:#f87171">' + escHTML(r.error) + '</span>');
+  return bits.length ? `<div class="appr-prov">${bits.join(' · ')}</div>` : '';
+}
+
 let currentFilter = 'pending'; // Default to pending so admin sees what needs action first
 let pollTimer = null;
 let isRendering = false;
@@ -284,13 +309,18 @@ async function render(isSilent = false) {
       return;
     }
 
-    const order = { pending: 0, approved: 1, declined: 2 };
+    const order = { pending: 0, approved: 1, failed: 2, declined: 3 };
     filtered.sort((a, b) => (order[a.status] - order[b.status]) || (b.at - a.at));
 
     list.innerHTML = filtered.map((r) => {
       const kind = (r.media === 'tv' || r.media === 'show') ? 'sonarr' : 'radarr';
-      const stCls = r.status === 'pending' ? 'st-pending' : r.status === 'approved' ? 'st-approved' : 'st-declined';
-      const stTxt = r.status === 'pending' ? '⏳ Pending Review' : r.status === 'approved' ? '✓ Approved' : '✕ Declined';
+      // 'failed' is new (direct adds Radarr/Sonarr rejected). Without its own
+      // branch it would have rendered as "✕ Declined", which is a lie.
+      const stCls = r.status === 'pending' ? 'st-pending' : r.status === 'approved' ? 'st-approved' : r.status === 'failed' ? 'st-failed' : 'st-declined';
+      const stTxt = r.status === 'pending' ? '⏳ Pending Review'
+        : r.status === 'approved' ? (r.decidedBy === 'auto' ? (r.result === 'exists' ? '✓ Already had it' : '✓ Sent directly') : '✓ Approved')
+        : r.status === 'failed' ? '⚠ Failed'
+        : '✕ Declined';
       const meta = renderMeta(r, kind);
       const actions = (d.admin && r.status === 'pending')
         ? `<div class="appr-actions"><button class="appr-btn appr-edit" data-editbtn="${r.id}" title="Edit settings before approving">✏️ Edit</button><button class="appr-btn appr-ok" data-approve="${r.id}">Approve</button><button class="appr-btn appr-no" data-decline="${r.id}">Decline</button></div>`
@@ -300,7 +330,7 @@ async function render(isSilent = false) {
       return `<div class="appr-row" data-row="${r.id}">
         <div class="appr-top">
           ${posterSrc ? `<img class="appr-poster" src="${escHTML(posterSrc)}" alt="" onerror="this.onerror=null;this.replaceWith(document.createRange().createContextualFragment('<div class=\\'appr-poster\\'>${fallbackIcon}</div>'));">` : `<div class="appr-poster">${fallbackIcon}</div>`}
-          <div class="appr-main"><div class="appr-t" data-detailbtn="${r.id}" style="cursor:pointer; transition:color 0.2s;" onmouseover="this.style.color='#5ec4f0'" onmouseout="this.style.color='#fff'" title="Click to view details">${r.title || ('#' + r.tmdbId)}</div><div class="appr-sub">${r.media === 'tv' || r.media === 'show' ? 'Series' : 'Movie'} · requested by <b>${r.by || 'user'}</b> · ${timeAgo(r.at)}</div>${meta}</div>
+          <div class="appr-main"><div class="appr-t" data-detailbtn="${r.id}" style="cursor:pointer; transition:color 0.2s;" onmouseover="this.style.color='#5ec4f0'" onmouseout="this.style.color='#fff'" title="Click to view details">${escHTML(r.title || ('#' + r.tmdbId))}</div><div class="appr-sub">${r.media === 'tv' || r.media === 'show' ? 'Series' : 'Movie'} · requested by <b>${escHTML(r.by || 'user')}</b>${roleTag(r)} · <span title="${escHTML(new Date(r.at).toLocaleString())}">${timeAgo(r.at)}</span></div>${provenance(r)}${meta}</div>
           ${actions}
         </div>
         <div class="appr-edit-panel" id="edit-${r.id}"></div>

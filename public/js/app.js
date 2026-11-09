@@ -104,7 +104,7 @@ document.addEventListener('click', (e) => {
 //  2) Search no longer steals focus onto the first result while you're still
 //     typing/paused (was causing an unwanted "jump" on desktop AND mobile).
 //     Focus into results now only happens on an intentional ArrowDown/Enter.
-import { toast, el, api, stars, authToken , escHTML, hasCache } from './util.js';
+import { toast, el, api, stars, authToken , escHTML, hasCache, prefetch, castTileHTML } from './util.js';
 import { openSettings } from './settings.js';
 import { setFocus } from './nav.js';
 // Overlay lifecycle lives in its own module — see the note in overlay.js for
@@ -494,16 +494,27 @@ document.getElementById('refreshBtn')?.addEventListener('click', async () => {
 
 const search = document.getElementById('search');
 let searchTimer;
-search.addEventListener('input', () => { clearTimeout(searchTimer); const q = search.value.trim(); if (!q) { showView(currentView); return; } searchTimer = setTimeout(() => runSearch(q), 350); });
+// Query whose results are currently painted in #app (null = some other view).
+let shownQuery = null;
+search.addEventListener('input', () => { clearTimeout(searchTimer); const q = search.value.trim(); if (!q) { shownQuery = null; showView(currentView); return; } searchTimer = setTimeout(() => runSearch(q), 350); });
 // Intentional "jump into results" — ONLY on ArrowDown/Enter, so typing (and
 // the debounce-triggered re-render after a pause) never steals focus away
 // from the input on its own. This is what was causing the "auto-scrolls to a
 // movie while I'm still typing/paused" bug on both desktop and mobile.
+//
+// Only ever targets a card in THIS query's results. It used to grab the first
+// .card anywhere in #app, so Enter right after a paste (inside the debounce)
+// focused a Home card — and nav.js's document-level Enter handler then
+// clicked it, opening an unrelated title.
 search.addEventListener('keydown', (e) => {
-  if (e.key === 'ArrowDown' || e.key === 'Enter') {
-    const first = app.querySelector('.card');
-    if (first) { e.preventDefault(); setFocus(first); }
-  }
+  if (e.key !== 'ArrowDown' && e.key !== 'Enter') return;
+  const q = search.value.trim();
+  if (!q) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const focusResult = () => { const first = app.querySelector('.search-results-grid .card'); if (first) setFocus(first); };
+  if (shownQuery === q) { focusResult(); return; }
+  if (e.key === 'Enter') { clearTimeout(searchTimer); runSearch(q).then((ok) => { if (ok) focusResult(); }); }
 });
 // Topbar, Bottom nav, and Mobile Drawer sync
 // Pre-highlight initial active tab immediately from URL hash or localStorage
@@ -522,8 +533,12 @@ try {
 
 function setupNavigation() {
   const drawer = document.getElementById('drawerOverlay');
-  const openDrawer = () => drawer?.classList.remove('hidden');
-  const closeDrawer = () => drawer?.classList.add('hidden');
+  // The drawer never pinned the page. Its menu is shorter than the screen, so
+  // it has nothing to scroll itself — iOS hands the whole drag to the document
+  // and the page slid up and down behind the open menu (Nick's 2026-10-02
+  // recording, 0:59-1:11). Same body pin the modals use, under its own key.
+  const openDrawer = () => { if (!drawer) return; drawer.classList.remove('hidden'); applyScrollLock('drawer'); };
+  const closeDrawer = () => { if (!drawer) return; drawer.classList.add('hidden'); releaseScrollLock('drawer'); };
 
   document.getElementById('mobileMenuBtn')?.addEventListener('click', openDrawer);
   document.getElementById('bottomMenuBtn')?.addEventListener('click', openDrawer);
@@ -599,6 +614,9 @@ async function showView(view, force = false) {
       return;
     }
   }
+  // A different tab starts at its top. Without this the new view inherited
+  // the previous one's scroll offset. Refreshing the SAME view keeps its place.
+  if (view !== currentView) window.scrollTo(0, 0);
   currentView = view;
   stopSlideshow();
   let route = '';
@@ -1010,6 +1028,7 @@ async function renderStreaming(force, seq) {
   const fns = [];
   for (const row of streamRows) fns.push(() => rowEl(row.title, row.items, false, true, row.brand));
   const renderChunk = (start, count) => {
+    if (seq && seq !== currentViewSeq) return;
     const chunk = fns.slice(start, start + count);
     for (const fn of chunk) app.appendChild(fn());
     if (start + count < fns.length) requestAnimationFrame(() => setTimeout(() => renderChunk(start + count, count), 20));
@@ -1030,6 +1049,7 @@ async function renderNew(force, seq) {
       const fns = [];
     for (const row of rows) fns.push(() => rowEl(row.title, row.items, false, false, row.brand));
     const renderChunk = (start, count) => {
+      if (seq && seq !== currentViewSeq) return;
       const chunk = fns.slice(start, start + count);
       for (const fn of chunk) app.appendChild(fn());
       if (start + count < fns.length) requestAnimationFrame(() => setTimeout(() => renderChunk(start + count, count), 20));
@@ -1091,6 +1111,7 @@ async function renderComing(force, seq) {
       const fns = [];
     for (const row of rows) fns.push(() => rowEl(row.title, row.items, false, false, row.brand));
     const renderChunk = (start, count) => {
+      if (seq && seq !== currentViewSeq) return;
       const chunk = fns.slice(start, start + count);
       for (const fn of chunk) app.appendChild(fn());
       if (start + count < fns.length) requestAnimationFrame(() => setTimeout(() => renderChunk(start + count, count), 20));
@@ -1099,10 +1120,19 @@ async function renderComing(force, seq) {
   focusFirstCard();
 }
 async function runSearch(q) {
+  // Take ownership of #app: bumping the view seq makes any view still loading
+  // behind the search (Home's rows, a hero, chunked rows) stop painting and
+  // stop calling focusFirstCard() — which yanked focus out of the search box
+  // (closing the keyboard on phones) and painted other titles over results.
+  const seq = ++currentViewSeq;
+  shownQuery = null;
   stopSlideshow(); app.innerHTML = skeleton();
   const results = await api('/api/discover/search?q=' + encodeURIComponent(q));
+  // A newer search (or the box being cleared) superseded this one.
+  if (seq !== currentViewSeq || search.value.trim() !== q) return false;
   app.innerHTML = '';
-  if (!Array.isArray(results) || !results.length) { app.appendChild(emptyState('No results for "' + q + '"', 'Try another title or keyword.')); return; }
+  shownQuery = q;
+  if (!Array.isArray(results) || !results.length) { app.appendChild(emptyState('No results for "' + q + '"', 'Try another title or keyword.')); return false; }
   const wrap = el('div', { class: 'search-results-wrap' });
   wrap.appendChild(el('div', { class: 'search-results-head' }, [
     el('div', { class: 'row-title' }, `Results for "${escHTML(q)}"`),
@@ -1112,6 +1142,7 @@ async function runSearch(q) {
   results.forEach((it) => grid.appendChild(card(it)));
   wrap.appendChild(grid);
   app.appendChild(wrap);
+  return true;
 }
 async function renderStatus() {
   const s = await api('/api/status');
@@ -1186,7 +1217,7 @@ function heroSlideshow(items) {
     // read as cramped. In-flow, the spacing is deterministic however the
     // overview wraps. `paint()` clears content, so they are re-appended here.
     content.appendChild(dots);
-    content.appendChild(el('div', { class: 'hero-actions' }, [el('button', { class: 'btn btn-primary', 'data-nav': '', onclick: () => openDetail(it) }, '▶  Trailer & Details'), heroReqBtn]));
+    content.appendChild(el('div', { class: 'hero-actions' }, [el('button', { class: 'btn btn-primary', 'data-nav': '', onclick: () => openDetail(it), onpointerdown: () => prefetchDetail(it) }, '▶  Trailer & Details'), heroReqBtn]));
     slides.forEach((s, i) => s.classList.toggle('on', i === idx));
     dotEls.forEach((d, i) => d.classList.toggle('on', i === idx));
   };
@@ -1234,13 +1265,14 @@ function rowEl(title, items, isPicked, ranked, brand) {
 // the "wrong movie opens" complaint. Keyboard/remote activation goes through
 // `element.click()`, which is untrusted and has `detail === 0`, so it bypasses
 // the gesture guard entirely.
-function bindCardActivate(cardEl, onActivate) {
+function bindCardActivate(cardEl, onActivate, onPress) {
   let sx = 0, sy = 0, startLeft = 0, rail = null, moved = false;
 
   cardEl.addEventListener('pointerdown', (e) => {
     sx = e.clientX; sy = e.clientY; moved = false;
     rail = cardEl.closest('.row-scroll, .cast-row');
     startLeft = rail ? rail.scrollLeft : 0;
+    if (onPress) onPress();
   }, { passive: true });
 
   cardEl.addEventListener('pointermove', (e) => {
@@ -1277,7 +1309,7 @@ function card(item, rank) {
         window.statusObserver.observe(c);
       }
     }
-    bindCardActivate(c, () => openDetail(item));
+    bindCardActivate(c, () => openDetail(item), () => prefetchDetail(item));
   if (item.poster) c.appendChild(posterImg(item.poster, item.title));
   else c.appendChild(el('div', { class: 'card-fallback' }, item.title || 'No image'));
   if (item.rating) c.appendChild(el('div', { class: 'card-badge' }, stars(item.rating)));
@@ -1297,7 +1329,53 @@ function downloadRow(name, percent, timeLeft) {
   return el('div', { class: 'dl-item' }, [el('div', { class: 'dl-row' }, [el('span', { class: 'dl-name' }, name || 'item'), el('span', { class: 'dl-meta' }, (percent != null ? percent + '%' : '') + (timeLeft ? ' · ' + timeLeft : ''))]), el('div', { class: 'bar' }, [el('i', { style: `width:${percent || 0}%` })])]);
 }
 // ---------- detail modal (with ownership badges) ----------
+let detailSeq = 0;
+function detailPath(item) {
+  const media = item.media === 'show' ? 'tv' : item.media || 'movie';
+  return `/api/discover/${media}/${item.id}`;
+}
+// Start the detail request the moment a finger lands on a card, not ~100ms+
+// later when the click is finally dispatched. api() de-duplicates, so the
+// openDetail() that follows awaits this same request. A touch that turns into
+// a scroll costs one request, which then sits in the 5-minute client cache.
+function prefetchDetail(item) { if (item && item.id) prefetch(detailPath(item)); }
+// Sheet artwork: a phone never needs the `original` backdrop behind a 16:9 box.
+function sheetArt(o) {
+  const narrow = (() => { try { return matchMedia('(max-width: 768px)').matches; } catch { return false; } })();
+  const src = o.backdrop || o.poster;
+  return src ? tmdbSized(src, narrow ? HERO_BACKDROP_SIZE_MOBILE : 'w1280') : null;
+}
+// Everything the card already carries, laid out exactly like the final sheet
+// (same hero box, same title/meta/overview classes) so hydration swaps content
+// in place instead of resizing the sheet.
+function renderDetailShell(cardEl, item, media) {
+  cardEl.innerHTML = '';
+  cardEl.appendChild(el('button', { class: 'modal-close', 'data-nav': '', onclick: closeModal }, '✕'));
+  const hero = el('div', { class: 'modal-video modal-shell-hero' });
+  const art = sheetArt(item);
+  if (art) hero.style.backgroundImage = `url(${art})`;
+  cardEl.appendChild(hero);
+  cardEl.appendChild(el('div', { class: 'modal-body modal-shell' }, [
+    el('div', { class: 'title-row' }, [el('h2', { class: 'modal-title', style: 'margin:0' }, item.title || '')]),
+    el('div', { class: 'modal-meta' }, [
+      item.year ? el('span', {}, String(item.year)) : null,
+      item.rating ? el('span', { class: 'tmdb-star-val', style: 'color:var(--gold)' }, stars(item.rating)) : null,
+      el('span', { class: 'chip' }, media === 'tv' ? 'TV' : 'Movie'),
+      el('span', { class: 'shell-bar', style: 'width:64px' }),
+      el('span', { class: 'shell-bar', style: 'width:52px' })
+    ]),
+    item.why ? el('div', { class: 'why-chip', style: 'position:static;display:inline-block;margin-bottom:12px' }, '✨ ' + item.why) : null,
+    item.overview
+      ? el('p', { class: 'modal-overview' }, item.overview)
+      : el('div', { class: 'modal-overview' }, [el('span', { class: 'shell-bar shell-line' }), el('span', { class: 'shell-bar shell-line' }), el('span', { class: 'shell-bar shell-line', style: 'width:62%' })]),
+    el('div', { class: 'modal-actions' }, [el('span', { class: 'shell-bar shell-btn' }), el('span', { class: 'shell-bar shell-btn' })])
+  ]));
+  cardEl.scrollTop = 0;
+}
 window.openDetail = openDetail;
+// live.js draws its cast with the same tiles and needs the same rail + person modal.
+window.openPerson = (p) => openPerson(p);
+window.railWithArrows = (scrollEl) => railWithArrows(scrollEl);
 export async function openDetail(item) {
   const modal = document.getElementById('modal');
   const cardEl = document.getElementById('modalCard');
@@ -1306,13 +1384,19 @@ export async function openDetail(item) {
   // The CSS grab bar on mobile now actually does something.
   clearSheetDrag(cardEl);
   enableSheetDrag(cardEl, closeModal);
-  cardEl.innerHTML = '<div style="padding:60px;text-align:center;color:var(--muted)">Loading…</div>';
   document.getElementById('modalBackdrop').onclick = closeModal;
   const media = item.media === 'show' ? 'tv' : item.media || 'movie';
-  if (!item.id) { cardEl.innerHTML = `<div style="padding:40px">No TMDB match for "${item.title}".</div>`; return; }
-  const d = await api(`/api/discover/${media}/${item.id}`);
+  if (!item.id) { cardEl.innerHTML = `<div style="padding:40px">No TMDB match for "${escHTML(item.title)}".</div>`; return; }
+  // Paint the sheet from what the card already knows, THEN fetch. This used to
+  // be a bare "Loading…" stub until the detail request returned (0.3-0.9s in
+  // Nick's 2026-10-02 recording), after which the sheet jumped to full height.
+  // A second open that overtakes this one must win, hence the sequence check.
+  const seq = ++detailSeq;
+  renderDetailShell(cardEl, item, media);
+  const d = await api(detailPath(item));
+  if (seq !== detailSeq || modal.classList.contains('hidden')) return;
   if (d.error) { cardEl.innerHTML = `<div style="padding:40px">${escHTML(d.error)}</div>`; return; }
-  
+
   // Sync status with client cache and existing cards
   if (window.mediaStatusCache) {
     if (d.inLibrary) {
@@ -1328,7 +1412,19 @@ export async function openDetail(item) {
   const media_label = media === 'tv' ? 'TV' : 'Movie';
   cardEl.innerHTML = '';
   cardEl.appendChild(el('button', { class: 'modal-close', 'data-nav': '', onclick: closeModal }, '✕'));
-  if (d.trailerKey) cardEl.appendChild(el('div', { class: 'modal-video', html: `<iframe src="https://www.youtube.com/embed/${d.trailerKey}?autoplay=0&rel=0&modestbranding=1" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>` }));
+  if (d.trailerKey) {
+    // The backdrop stays behind the player and the iframe fades in on load.
+    // A cross-origin iframe paints opaque WHITE until its document arrives,
+    // which showed as a white flash at the top of every sheet.
+    const mv = el('div', { class: 'modal-video', html: `<iframe class="is-loading" src="https://www.youtube.com/embed/${d.trailerKey}?autoplay=0&rel=0&modestbranding=1&playsinline=1" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>` });
+    const art = sheetArt(d);
+    if (art) mv.style.backgroundImage = `url(${art})`;
+    const frame = mv.querySelector('iframe');
+    const reveal = () => frame.classList.remove('is-loading');
+    frame.addEventListener('load', reveal, { once: true });
+    setTimeout(reveal, 4000);   // never leave the player hidden if `load` is missed
+    cardEl.appendChild(mv);
+  }
   else { const mh = el('div', { class: 'modal-hero' }); if (d.backdrop) mh.style.backgroundImage = `url(${d.backdrop})`; cardEl.appendChild(mh); }
   // Title row + ownership badges (✓ in library, series status, streaming brand logo).
   const ownBadges = el('div', { class: 'own-badges' });
@@ -1565,20 +1661,11 @@ function renderMetadataBlock(d, media) {
     const cast = el('div', { class: 'cast-row' });
     d.cast.forEach((p) => {
       // Portrait tile: headshot fills the card, caption rides a scrim on top.
-      const media = p.photo
-        ? el('img', { src: p.photo, loading: 'lazy', alt: p.name })
-        : el('div', { class: 'cast-ph', 'aria-hidden': 'true' }, initials(p.name));
       const cc = el('div', {
         class: 'cast', tabindex: '0', 'data-nav': '', role: 'button',
-        'aria-label': p.character ? `${p.name} as ${p.character}` : p.name,
-        style: 'cursor:pointer'
-      }, [
-        media,
-        el('div', { class: 'cast-info' }, [
-          el('div', { class: 'cast-name' }, p.name),
-          p.character ? el('div', { class: 'cast-char' }, p.character) : null
-        ])
-      ]);
+        'aria-label': p.character ? `${p.name} as ${p.character}` : p.name
+      });
+      cc.innerHTML = castTileHTML(p);
       cc.addEventListener('click', () => openPerson(p));
       cast.appendChild(cc);
     });
@@ -1839,12 +1926,6 @@ function railWithArrows(scrollEl) {
   return shell;
 }
 
-// Two-letter monogram for cast members TMDB has no headshot for.
-function initials(name) {
-  const parts = String(name || '').trim().split(/s+/).filter(Boolean);
-  if (!parts.length) return '?';
-  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
-}
 function isTop(title) { return /· Top 10$/.test(title || '') || /Top 250/.test(title || ''); }
 function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 function normalize(c, media) {
@@ -1873,7 +1954,7 @@ function errorState(title, detail, onRetry) {
     ])
   ]);
 }
-function focusFirstCard() { setTimeout(() => { const first = document.querySelector('.hero-actions .btn, .card, .status-card, .seg button'); if (first) setFocus(first); }, 120); }
+function focusFirstCard() { setTimeout(() => { const a = document.activeElement; if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable)) return; const first = document.querySelector('.hero-actions .btn, .card, .status-card, .seg button'); if (first) setFocus(first); }, 120); }
 boot();
 
 

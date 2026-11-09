@@ -104,24 +104,22 @@ if (isIOS() && !isStandalone() && !snoozed() && bumpVisits() >= MIN_VISITS) {
   setTimeout(() => render('ios'), 2600);
 }
 
-// --- iOS standalone gesture guard ---
-// @media (display-mode: standalone) sets overscroll-behavior-y: none, which
-// WebKit ignores — so pull-to-refresh and rubber-banding still fired inside
-// the installed app. Cancel a downward drag that begins at scrollTop 0.
-// passive:false is required; preventDefault() is a no-op on a passive listener.
-if (isStandalone()) {
-  let startY = 0;
-  document.addEventListener('touchstart', (e) => {
-    if (e.touches.length === 1) startY = e.touches[0].clientY;
-  }, { passive: true });
-
-  document.addEventListener('touchmove', (e) => {
-    if (e.touches.length !== 1) return;
-    const dy = e.touches[0].clientY - startY;
-    if (dy <= 0) return; // dragging up is always fine
-    const scroller = e.target.closest?.('.app, .modal-card, .req-body, .row-scroll, .drawer-body, .settings-modal-card');
-    if (!scroller) { e.preventDefault(); return; }
-    // Dragging down while already pinned at the top == pull-to-refresh.
-    if (scroller.scrollTop <= 0) e.preventDefault();
-  }, { passive: false });
-}
+// --- Standalone gesture guard: REMOVED 2026-09-22 ---
+// This used to cancel any downward finger drag (i.e. scrolling back UP) when
+// the nearest of `.app, .modal-card, .req-body, .row-scroll, ...` reported
+// scrollTop <= 0, to suppress pull-to-refresh in the installed app.
+//
+// But the page does not scroll inside `.app` — the DOCUMENT does. `.app` and
+// every `.row-scroll` report scrollTop 0 no matter how far down you are, so
+// the guard cancelled every scroll-up everywhere. In the installed PWA you
+// could scroll down any tab and then never come back up. Measured: page at
+// scrollTop 1624, touch on a poster -> .row-scroll (scrollTop 0), touch on a
+// heading -> .app (scrollTop 0) -> preventDefault in both cases.
+//
+// It was also a passive:false touchmove on the whole document, which forces
+// the browser to run JS before every scroll frame instead of scrolling on the
+// compositor thread — a large part of the laggy feel in the installed app.
+//
+// Nothing is lost by deleting it: `overscroll-behavior-y: none` under
+// `@media (display-mode: standalone)` in enhance.css is what stops Android's
+// pull-to-refresh, and iOS home-screen apps have no pull-to-refresh at all.

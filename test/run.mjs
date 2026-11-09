@@ -236,6 +236,171 @@ await test('malformed tokens are rejected without throwing', () => {
   }
 });
 
+// --- Request audit log ----------------------------------------------------
+// Runs against the scratch CONFIG_DIR set above — never the real config.
+{
+  const { logRequest, logDirect, roleOf } = await import('../server/lib/requestlog.js');
+  const { load, setRequests } = await import('../server/config.js');
+
+  await test('direct add is recorded as approved/auto with provenance', async () => {
+    setRequests([]);
+    logDirect({ media: 'movie', tmdbId: 550, title: 'Fight Club', by: 'nick', byRole: 'admin', source: 'discord', external: '1' }, { kind: 'added', arrId: 42 });
+    const [r] = load().requests;
+    assert.equal(r.status, 'approved');
+    assert.equal(r.decidedBy, 'auto');
+    assert.equal(r.result, 'added');
+    assert.equal(r.source, 'discord');
+    assert.equal(r.external, '1');
+    assert.equal(r.byRole, 'admin');
+    assert.equal(r.arrId, 42);
+    assert.ok(r.id && r.at, 'has id and timestamp');
+  });
+
+  await test('an existing title is recorded as approved with result "exists"', async () => {
+    setRequests([]);
+    logDirect({ media: 'movie', tmdbId: 1, title: 'X' }, { kind: 'exists' });
+    const [r] = load().requests;
+    assert.equal(r.status, 'approved');
+    assert.equal(r.result, 'exists');
+    assert.equal(r.note, 'already in library');
+  });
+
+  await test('a rejected add is recorded as failed, with the error', async () => {
+    setRequests([]);
+    logDirect({ media: 'tv', tmdbId: 2, title: 'Y' }, { kind: 'failed', error: 'Radarr said no' });
+    const [r] = load().requests;
+    assert.equal(r.status, 'failed');
+    assert.equal(r.error, 'Radarr said no');
+  });
+
+  await test('newest entries come first', async () => {
+    setRequests([]);
+    logRequest({ status: 'approved', title: 'first' });
+    logRequest({ status: 'approved', title: 'second' });
+    assert.deepEqual(load().requests.map((r) => r.title), ['second', 'first']);
+  });
+
+  await test('the log is capped, and pending entries are never trimmed', async () => {
+    const seed = [{ id: 'keep-me', status: 'pending', at: 0, title: 'oldest but pending' }];
+    for (let i = 0; i < 2000; i++) seed.unshift({ id: 'a' + i, status: 'approved', at: i });
+    setRequests(seed);
+    logRequest({ status: 'approved', title: 'newest' });
+    const reqs = load().requests;
+    assert.ok(reqs.length <= 2000, `length ${reqs.length} exceeds cap`);
+    assert.equal(reqs[0].title, 'newest');
+    assert.ok(reqs.some((r) => r.id === 'keep-me'), 'pending entry was trimmed');
+  });
+
+  await test('roleOf distinguishes admin, user and guest', async () => {
+    assert.equal(roleOf({ role: 'admin' }), 'admin');
+    assert.equal(roleOf({ role: 'user' }), 'user');
+    assert.equal(roleOf(null), 'guest');
+  });
+}
+
+// --- twoPhase (AI Suggestions: quick answer now, refined answer later) -------
+{
+  const { twoPhase } = await import('../server/lib/twophase.js');
+  const gate = () => { let open; const p = new Promise((r) => { open = r; }); return { p, open }; };
+
+  await test('twoPhase returns the quick value at once and the refined one later', async () => {
+    const g = gate(); let quickRuns = 0, refineRuns = 0;
+    const opts = {
+      key: 'tp:a',
+      quick: async () => { quickRuns++; return { value: 'quick', ctx: 1 }; },
+      refine: async () => { refineRuns++; await g.p; return { value: 'refined', ok: true }; }
+    };
+    assert.deepEqual(await twoPhase(opts), { value: 'quick', pending: true });
+    // Polls while the job runs: same answer, and nothing is recomputed.
+    assert.deepEqual(await twoPhase(opts), { value: 'quick', pending: true });
+    assert.equal(quickRuns, 1); assert.equal(refineRuns, 1);
+    g.open(); await new Promise((r) => setTimeout(r, 5));
+    assert.deepEqual(await twoPhase(opts), { value: 'refined', pending: false });
+    assert.equal(refineRuns, 1);
+  });
+
+  await test('twoPhase with nothing to refine is final immediately', async () => {
+    let refined = false;
+    const r = await twoPhase({ key: 'tp:b', quick: async () => ({ value: 'only', done: true }), refine: async () => { refined = true; return { value: 'x', ok: true }; } });
+    assert.deepEqual(r, { value: 'only', pending: false });
+    assert.equal(refined, false);
+  });
+
+  await test('twoPhase: a refine that throws falls back to the quick value, not pending forever', async () => {
+    const opts = { key: 'tp:c', quick: async () => ({ value: 'quick', ctx: 1 }), refine: async () => { throw new Error('model down'); } };
+    assert.equal((await twoPhase(opts)).pending, true);
+    await new Promise((r) => setTimeout(r, 5));
+    assert.deepEqual(await twoPhase(opts), { value: 'quick', pending: false });
+  });
+
+  await test('twoPhase: a failed refine (ok:false) is cached only briefly', async () => {
+    const opts = { key: 'tp:d', retryTtl: 20, quick: async () => ({ value: 'quick', ctx: 1 }), refine: async () => ({ value: 'unranked', ok: false }) };
+    await twoPhase(opts);
+    await new Promise((r) => setTimeout(r, 5));
+    assert.deepEqual(await twoPhase(opts), { value: 'unranked', pending: false });
+    await new Promise((r) => setTimeout(r, 30));
+    // Expired: the next visit tries the model again.
+    assert.equal((await twoPhase(opts)).pending, true);
+  });
+
+  await test('twoPhase wait:true holds until the refined value exists', async () => {
+    const r = await twoPhase({ key: 'tp:e', wait: true, quick: async () => ({ value: 'quick', ctx: 1 }), refine: async () => { await new Promise((x) => setTimeout(x, 10)); return { value: 'refined', ok: true }; } });
+    assert.deepEqual(r, { value: 'refined', pending: false });
+  });
+
+  await test('twoPhase force drops the old final so follow-up polls do not see it', async () => {
+    const g = gate(); let n = 0;
+    const opts = { key: 'tp:f', quick: async () => ({ value: 'quick' + (++n), ctx: 1 }), refine: async () => { if (n > 1) await g.p; return { value: 'refined' + n, ok: true }; } };
+    await twoPhase({ ...opts, wait: true });
+    assert.deepEqual(await twoPhase(opts), { value: 'refined1', pending: false });
+    assert.deepEqual(await twoPhase({ ...opts, force: true }), { value: 'quick2', pending: true });
+    assert.deepEqual(await twoPhase(opts), { value: 'quick2', pending: true });
+    g.open(); await new Promise((r) => setTimeout(r, 5));
+    assert.deepEqual(await twoPhase(opts), { value: 'refined2', pending: false });
+  });
+
+  await test('twoPhase working keys stay out of the disk snapshot', async () => {
+    const snap = cache.snapshot() || '';
+    assert.ok(!snap.includes('quick:tp:'), 'quick: working entries were persisted');
+  });
+}
+
+// --- Live › History mapping -------------------------------------------------
+{
+  const T = await import('../server/services/tautulli.js');
+  const raw = (o) => ({ row_id: 1, date: 1700000000, duration: 600, user_id: 5, friendly_name: 'Maria', media_type: 'movie', title: 'Dune', year: 2021, rating_key: 10, transcode_decision: 'direct play', percent_complete: 90, watched_status: 1, platform: 'webOS', player: 'LG', ...o });
+
+  await test('historyRow maps an episode to its show, with S/E and show key', async () => {
+    const r = T.historyRow(raw({ media_type: 'episode', title: 'Pilot', grandparent_title: 'Lupin', grandparent_rating_key: 77, parent_media_index: 2, media_index: 3 }));
+    assert.equal(r.title, 'Lupin'); assert.equal(r.episodeTitle, 'Pilot');
+    assert.equal(r.season, 2); assert.equal(r.episode, 3); assert.equal(r.showKey, 77); assert.equal(r.ep, true);
+  });
+
+  await test('historyRow keeps a movie keyed by its own rating key', async () => {
+    const r = T.historyRow(raw({}));
+    assert.equal(r.title, 'Dune'); assert.equal(r.ratingKey, 10); assert.equal(r.showKey, null); assert.equal(r.watched, true);
+  });
+
+  await test('summarize counts plays, time, decisions and ranks users', async () => {
+    const rows = [
+      raw({ row_id: 1, friendly_name: 'Maria', user_id: 5, transcode_decision: 'transcode' }),
+      raw({ row_id: 2, friendly_name: 'Maria', user_id: 5 }),
+      raw({ row_id: 3, friendly_name: 'Nick', user_id: 6, transcode_decision: 'copy', duration: 1200 })
+    ].map(T.historyRow);
+    const s = T.summarize(rows);
+    assert.equal(s.plays, 3); assert.equal(s.seconds, 2400);
+    assert.deepEqual(s.decisions, { 'direct play': 1, copy: 1, transcode: 1 });
+    assert.equal(s.users[0].name, 'Maria'); assert.equal(s.users[0].plays, 2); assert.equal(s.users[0].userId, 5);
+    assert.equal(s.titles[0].name, 'Dune'); assert.equal(s.titles[0].plays, 3);
+  });
+
+  await test('sessionDetail reads a saved play record (burned-in subtitles)', async () => {
+    const d = T.sessionDetail({ video_codec: 'hevc', stream_video_codec: 'h264', stream_video_decision: 'transcode', subtitle_codec: 'pgs', stream_subtitle_decision: 'burn', subtitles: 1 });
+    assert.equal(d.video.src.codec, 'HEVC'); assert.equal(d.video.out.codec, 'H264');
+    assert.equal(d.subtitle.on, true); assert.equal(d.subtitle.decision, 'burn');
+  });
+}
+
 // --- report -----------------------------------------------------------------
 
 console.log('\n' + results.join('\n'));

@@ -94,22 +94,62 @@ export async function api(path, opts = {}) {
     }
   }
 
-  const headers = Object.assign({}, opts.headers || {});
-  const t = authToken();
-  if (t) headers.Authorization = 'Bearer ' + t;
-  const r = await fetch(path, Object.assign({}, opts, { headers }));
-  if (r.status === 401) { document.dispatchEvent(new CustomEvent('auth:required')); return { error: 'auth required', _401: true }; }
-  const ct = r.headers.get('content-type') || '';
-  const data = ct.includes('application/json') ? await r.json() : await r.text();
+  // Join an identical GET that is already on the wire. This is what makes
+  // prefetch() worth anything: the detail request starts on touch-down, and
+  // the openDetail() that follows on click awaits that same request instead of
+  // firing a second one behind it.
+  const dedupe = method === 'GET' && !isForce;
+  if (dedupe && inFlight.has(cacheKey)) return inFlight.get(cacheKey);
 
-  if (method === 'GET' && !isForce && data && !data.error) {
-    clientApiCache.set(cacheKey, { data, time: Date.now() });
-    schedulePersist();
-  }
-  return data;
+  const run = (async () => {
+    const headers = Object.assign({}, opts.headers || {});
+    const t = authToken();
+    if (t) headers.Authorization = 'Bearer ' + t;
+    const r = await fetch(path, Object.assign({}, opts, { headers }));
+    if (r.status === 401) { document.dispatchEvent(new CustomEvent('auth:required')); return { error: 'auth required', _401: true }; }
+    const ct = r.headers.get('content-type') || '';
+    const data = ct.includes('application/json') ? await r.json() : await r.text();
+
+    // A `pending` payload is a placeholder the caller will poll past
+    // (AI Suggestions); caching it would hand every poll the same placeholder.
+    if (method === 'GET' && !isForce && data && !data.error && !data.pending) {
+      clientApiCache.set(cacheKey, { data, time: Date.now() });
+      schedulePersist();
+    }
+    return data;
+  })();
+
+  if (!dedupe) return run;
+  inFlight.set(cacheKey, run);
+  try { return await run; } finally { inFlight.delete(cacheKey); }
+}
+
+const inFlight = new Map();
+
+// Warm the client cache for a GET the user is about to need. Errors are
+// swallowed — the real call will surface them.
+export function prefetch(path) {
+  if (hasCache(path)) return;
+  api(path).catch(() => {});
 }
 
 export function stars(v) { return v ? `★ ${Number(v).toFixed(1)}` : ''; }
+
+// Inner markup of a cast portrait tile (.cast in styles.css). Shared by the
+// title modal and the Live Streaming sheet so both draw the same card. A
+// missing headshot becomes a monogram on a gradient whose hue is derived from
+// the name, so a row of placeholders reads as distinct people, not blanks.
+export function castTileHTML(p) {
+  const name = String(p?.name || '');
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const mono = parts.length ? (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase() : '?';
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.codePointAt(0)) % 360;
+  const media = p?.photo
+    ? `<img src="${escHTML(p.photo)}" alt="" loading="lazy" decoding="async">`
+    : `<div class="cast-ph" style="--h:${h}" aria-hidden="true">${escHTML(mono)}</div>`;
+  return `${media}<div class="cast-info"><div class="cast-name">${escHTML(name)}</div>${p?.character ? `<div class="cast-char">${escHTML(p.character)}</div>` : ''}</div>`;
+}
 
 export function escHTML(str) {
   if (str == null) return '';

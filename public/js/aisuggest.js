@@ -18,9 +18,26 @@ function injectStyles() {
   .ais-badge{font-size:11px;font-weight:800;padding:4px 10px;border-radius:999px;background:linear-gradient(135deg,#6d5ef0,#1E88C7);color:#fff;}
   .ais-sub{padding:0 40px 10px;color:#9aa0ad;font-size:13.5px;}
   .ais-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:16px;padding:12px 40px 50px;}
+  .ais-skel{aspect-ratio:2/3;border-radius:12px;background:linear-gradient(90deg,#16161f 25%,#1e1e2a 50%,#16161f 75%);background-size:200% 100%;animation:shimmer 1.4s infinite;}
+  .ais-badge.is-working{animation:aisPulse 1.2s ease-in-out infinite;}
+  @keyframes aisPulse{50%{opacity:.55;}}
+  @media (prefers-reduced-motion: reduce){.ais-skel,.ais-badge.is-working{animation:none;}}
   .ais-empty{padding:70px 40px;text-align:center;color:#9aa0ad;}
   .ais-empty h3{color:#fff;font-size:22px;margin-bottom:8px;}
-  .ais-cta{margin-top:16px;padding:12px 22px;border:0;border-radius:11px;font-weight:800;background:linear-gradient(135deg,#6d5ef0,#1E88C7);color:#fff;cursor:pointer;}`;
+  .ais-cta{margin-top:16px;padding:12px 22px;border:0;border-radius:11px;font-weight:800;background:linear-gradient(135deg,#6d5ef0,#1E88C7);color:#fff;cursor:pointer;}
+  .ais-badge{white-space:nowrap;}
+  /* Phones: the desktop 40px gutters left room for ONE 168px column on a
+     375-428px screen, with the other half of the page empty. Two columns, and
+     the reason chip drops under the rating badge instead of sitting on it. */
+  @media (max-width: 768px){
+    .ais-head{padding:8px 16px 2px;}
+    .ais-title{font-size:22px;}
+    .ais-sub{padding:0 16px 8px;font-size:12.5px;}
+    .ais-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:8px 16px 40px;}
+    .ais-grid .card{width:100% !important;min-width:0 !important;max-width:none !important;}
+    .ais-grid .why-chip{top:36px !important;left:8px;right:auto !important;max-width:calc(100% - 16px) !important;}
+    .ais-empty{padding:48px 20px;}
+  }`;
   const st = document.createElement('style'); st.id = 'ais-styles'; st.textContent = css; document.head.appendChild(st);
 }
 
@@ -89,13 +106,69 @@ async function openDetail(item) {
   if (window.__nsUpgradeButtons) window.__nsUpgradeButtons(cardEl);
 }
 
+// The server now answers in two phases (server/lib/twophase.js): rule-based
+// picks straight away with `pending: true`, then the AI-ranked list once the
+// model has replied. This tab used to await ONE request that blocked on the
+// model — up to 45s of "Building your picks…" over an empty grid, long enough
+// that nobody waits it out.
+const POLL_MS = 3000;
+const POLL_MAX = 40;            // ~2 min, comfortably past the 45s model timeout
+let renderSeq = 0;              // invalidates polls/paints from a superseded render
+let pollTimer = null;
+let last = null;                // { token, data } — instant repaint on return visits
+
+function stopPolling() { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; } }
+function tokenKey() { return localStorage.getItem('nickseer_token') || ''; }
+// Same list, same order, same reasons => nothing to repaint.
+function signature(d) { return (d.source || '') + '|' + (d.pending ? 1 : 0) + '|' + (d.items || []).map((i) => `${i.media}:${i.id}:${i.why || ''}`).join(','); }
+
+function skeletonCards(n = 12) {
+  return Array.from({ length: n }).map(() => '<div class="ais-skel" aria-hidden="true"></div>').join('');
+}
+
 async function render() {
   injectStyles();
   const root = app(); if (!root) return;
-  root.innerHTML = `<div id="aisView"><div class="ais-head"><div class="ais-title">🤖 AI Suggestions <span class="ais-badge" id="aisSrc">…</span></div></div><div class="ais-sub" id="aisSub">Building your picks…</div><div class="ais-grid" id="aisGrid"></div></div>`;
-  const d = await api('/api/discover/ai-suggest');
+  const seq = ++renderSeq;
+  stopPolling();
+  root.innerHTML = `<div id="aisView"><div class="ais-head"><div class="ais-title">🤖 AI Suggestions <span class="ais-badge" id="aisSrc">…</span></div></div><div class="ais-sub" id="aisSub">Building your picks…</div><div class="ais-grid" id="aisGrid">${skeletonCards()}</div></div>`;
+
+  // Paint what we showed last time while the request is in flight.
+  let shown = '';
+  if (last && last.token === tokenKey()) { paint(last.data); shown = signature(last.data); }
+
+  const alive = () => seq === renderSeq && !!document.getElementById('aisView');
+  let tries = 0;
+  const load = async () => {
+    const d = await api('/api/discover/ai-suggest');
+    if (!alive()) return;
+    if (d.error && !(d.items && d.items.length)) {
+      // Keep whatever is already on screen; only say so if there is nothing.
+      if (!shown) paintError(d.error);
+      return;
+    }
+    const sig = signature(d);
+    if (sig !== shown) { paint(d); shown = sig; }
+    last = { token: tokenKey(), data: d };
+    if (d.pending && ++tries < POLL_MAX) pollTimer = setTimeout(load, POLL_MS);
+    else if (d.pending) paint({ ...d, pending: false });   // model never answered: drop the "refining" note
+  };
+  load();
+}
+
+function paintError(msg) {
   const src = document.getElementById('aisSrc'); const sub = document.getElementById('aisSub'); const grid = document.getElementById('aisGrid');
+  if (!grid) return;
+  src.textContent = 'offline'; sub.textContent = 'Could not load suggestions.';
+  grid.innerHTML = `<div class="ais-empty" style="grid-column:1/-1"><h3>Something went wrong</h3><p>${escHTML(msg)}</p><button class="ais-cta" id="aisRetry">Try again</button></div>`;
+  const b = document.getElementById('aisRetry'); if (b) b.onclick = render;
+}
+
+function paint(d) {
+  const src = document.getElementById('aisSrc'); const sub = document.getElementById('aisSub'); const grid = document.getElementById('aisGrid');
+  if (!src || !sub || !grid) return;
   const days = d.days || (d.tuning && d.tuning.historyDays) || 60;
+  grid.innerHTML = '';
 
   if (!d.aiConfigured) {
     src.textContent = 'not set up'; sub.textContent = 'No AI provider configured.';
@@ -104,8 +177,10 @@ async function render() {
     return;
   }
   if (d.note === 'no-history') { src.textContent = d.source === 'ai' ? 'AI' : 'rules'; sub.textContent = `No plays in the last ${days} days yet — watch a few things in Plex.`; grid.innerHTML = `<div class="ais-empty" style="grid-column:1/-1"><h3>Nothing to learn from yet</h3><p>Watch a few movies or episodes and this fills with tailored picks.</p></div>`; return; }
-  src.textContent = d.source === 'ai' ? 'AI-ranked' : 'rule-based';
-  sub.textContent = (d.basedOn && d.basedOn.length ? `Based on your last ${days} days: ${d.basedOn.join(', ')}` : `Tailored to your last ${days} days`);
+  src.textContent = d.pending ? 'AI ranking…' : (d.source === 'ai' ? 'AI-ranked' : 'rule-based');
+  src.classList.toggle('is-working', !!d.pending);
+  sub.textContent = (d.basedOn && d.basedOn.length ? `Based on your last ${days} days: ${d.basedOn.join(', ')}` : `Tailored to your last ${days} days`)
+    + (d.pending ? ' · quick picks shown — the AI is refining the order' : '');
   const items = d.items || [];
   if (!items.length) { grid.innerHTML = `<div class="ais-empty" style="grid-column:1/-1"><h3>No suggestions right now</h3><p>Try ⟳ refresh, or loosen the filters in Settings → AI Brain.</p></div>`; return; }
   items.forEach((it) => grid.appendChild(card(it)));
@@ -115,7 +190,11 @@ function isActive() { const b = document.querySelector('.nav-link[data-view="ai"
 function init() {
   const btn = document.querySelector('.nav-link[data-view="ai"]');
   if (btn) btn.addEventListener('click', () => setTimeout(render, 0));
-  const obs = new MutationObserver(() => { if (isActive() && !document.getElementById('aisView')) render(); });
+  const obs = new MutationObserver(() => {
+    const here = !!document.getElementById('aisView');
+    if (isActive() && !here) render();
+    else if (!here) stopPolling();   // navigated away mid-rerank
+  });
   obs.observe(app() || document.body, { childList: true, subtree: true });
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(init, 300));

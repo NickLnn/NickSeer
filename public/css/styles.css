@@ -196,48 +196,60 @@ body::before{content:"";position:fixed;inset:0;z-index:-3;background:var(--bg);}
    --------------------------------------------------------------------- */
 .cast-row{display:flex;gap:14px;overflow-x:auto;padding:4px 2px 14px;}
 .cast{
-  flex:0 0 auto;width:132px;aspect-ratio:2/3;position:relative;
-  border-radius:16px;overflow:hidden;isolation:isolate;
-  background:linear-gradient(155deg,#22222e,#14141c);
-  box-shadow:0 6px 20px rgba(0,0,0,.45);
-  transition:transform .28s cubic-bezier(.2,.7,.3,1),box-shadow .28s ease;
+  flex:0 0 auto;width:128px;aspect-ratio:2/3;position:relative;
+  border-radius:14px;overflow:hidden;isolation:isolate;cursor:pointer;
+  background:#17171f;
+  box-shadow:0 10px 26px -8px rgba(0,0,0,.7);
+  transition:transform .3s cubic-bezier(.2,.7,.3,1),box-shadow .3s ease;
+}
+/* Hairline ring drawn above the photo: gives every tile a crisp edge against
+   the dark sheet, and brightens on hover/focus instead of a heavy outline. */
+.cast::after{
+  content:"";position:absolute;inset:0;z-index:2;border-radius:inherit;pointer-events:none;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.09);
+  transition:box-shadow .3s ease;
 }
 .cast img,.cast .cast-ph{
   position:absolute;inset:0;width:100%;height:100%;
-  object-fit:cover;object-position:50% 18%;
-  transition:transform .45s cubic-bezier(.2,.7,.3,1);
+  object-fit:cover;object-position:50% 20%;
+  transition:transform .5s cubic-bezier(.2,.7,.3,1);
 }
-/* Initials stand in for a missing headshot — quieter than a placeholder glyph. */
+/* Missing headshot: monogram on a per-name hue (--h from castTileHTML) so a
+   run of placeholders reads as different people rather than empty slots. */
 .cast .cast-ph{
-  display:grid;place-items:center;
-  font-size:30px;font-weight:800;letter-spacing:1px;
-  color:rgba(255,255,255,.26);
-  background:linear-gradient(155deg,#262633,#16161f);
+  display:grid;place-items:center;padding-bottom:34%;
+  font-size:34px;font-weight:800;letter-spacing:.02em;
+  color:rgba(255,255,255,.92);text-shadow:0 2px 12px rgba(0,0,0,.35);
+  background:
+    radial-gradient(120% 90% at 25% 10%,hsl(var(--h,250) 55% 42% / .95),transparent 60%),
+    linear-gradient(160deg,hsl(var(--h,250) 40% 24%),hsl(calc(var(--h,250) + 40) 35% 11%));
 }
 /* Scrim keeps the caption legible over bright or busy headshots. */
 .cast-info{
   position:absolute;left:0;right:0;bottom:0;z-index:1;
-  padding:22px 10px 10px;
-  background:linear-gradient(to top,rgba(0,0,0,.94) 12%,rgba(0,0,0,.72) 48%,rgba(0,0,0,0) 100%);
+  padding:34px 10px 10px;
+  background:linear-gradient(to top,rgba(8,8,12,.96) 0%,rgba(8,8,12,.78) 42%,rgba(8,8,12,0) 100%);
 }
 .cast-name{
-  font-size:12.5px;font-weight:700;line-height:1.25;color:#fff;
+  font-size:13px;font-weight:750;line-height:1.22;color:#fff;letter-spacing:-.005em;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
 }
 .cast-char{
-  font-size:11px;line-height:1.3;margin-top:2px;color:rgba(255,255,255,.62);
-  display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;
+  font-size:11px;font-weight:500;line-height:1.3;margin-top:3px;color:rgba(255,255,255,.58);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
 }
 @media (hover:hover){
-  .cast:hover{transform:translateY(-6px);box-shadow:0 16px 34px rgba(0,0,0,.6);}
-  .cast:hover img{transform:scale(1.07);}
+  .cast:hover{transform:translateY(-5px);box-shadow:0 18px 36px -10px rgba(0,0,0,.85);}
+  .cast:hover::after{box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.38);}
+  .cast:hover img,.cast:hover .cast-ph{transform:scale(1.06);}
 }
-.cast:focus-visible{outline:2px solid var(--focus);outline-offset:3px;}
-@media (max-width:640px){ .cast{width:116px;} .cast-name{font-size:12px;} }
+.cast:focus-visible{outline:none;}
+.cast:focus-visible::after{box-shadow:inset 0 0 0 2px var(--focus);}
+@media (max-width:640px){ .cast{width:108px;border-radius:12px;} .cast-name{font-size:12px;} .cast .cast-ph{font-size:28px;} }
 @media (prefers-reduced-motion:reduce){
-  .cast,.cast img{transition:none;}
+  .cast,.cast img,.cast .cast-ph,.cast::after{transition:none;}
   .cast:hover{transform:none;}
-  .cast:hover img{transform:none;}
+  .cast:hover img,.cast:hover .cast-ph{transform:none;}
 }
 
 /* ---------------------------------------------------------------------

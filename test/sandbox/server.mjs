@@ -65,6 +65,18 @@ const FILLER = [
 let nextId = 1000;
 const byId = new Map();
 
+// Latency knobs, so the things that only show up on a real network are
+// visible here: the detail sheet's instant shell, and the AI tab's two phases.
+//   node test/sandbox/server.mjs 5099 --detail-delay=900 --ai-pending=8000
+const argNum = (name, dflt) => { const a = process.argv.find((x) => x.startsWith(`--${name}=`)); return a ? Number(a.split('=')[1]) : dflt; };
+const DETAIL_DELAY_MS = argNum('detail-delay', 900);
+const AI_PENDING_MS = argNum('ai-pending', 8000);
+// Slow Home (/api/discover/home + /rows), to reproduce typing into search while Home
+// is still loading behind it: --home-delay=4000
+const HOME_DELAY_MS = argNum('home-delay', 0);
+let aiFirstSeen = 0;
+const apiHits = { detail: 0 };
+
 // Mutable so the Settings integrations panel can be tested end to end.
 const secrets = {
   apiKey: 'SANDBOX-api-key-0000000000',
@@ -119,6 +131,166 @@ function poster(id) {
 </svg>`;
 }
 
+// Live Streaming fixtures, in the shape tautulli.activity() returns. The
+// playing sessions advance with wall-clock time so the detail sheet's live
+// progress can be watched moving between polls.
+const LIVE_T0 = Date.now();
+function liveNow() {
+  const mv = allItems.find((i) => i.media === 'movie');
+  const ep = allItems.find((i) => i.media === 'tv');
+  const elapsed = Date.now() - LIVE_T0;
+  const base = (it, o) => ({
+    title: it.title, year: it.year, poster: it.poster, backdrop: it.backdrop,
+    tmdbId: it.id, media: it.media, ...o,
+    progress: Math.round((o.detail.viewOffset / o.detail.duration) * 100)
+  });
+  const det = (o) => ({
+    summary: 'Sandbox summary from Plex.', tagline: '', contentRating: 'PG-13', studio: 'Sandbox Studios',
+    released: '2010-11-19', genres: ['Adventure', 'Fantasy'], directors: ['Jane Director'],
+    season: 0, episode: 0, episodeTitle: '', userThumb: '', transcodeProgress: 0,
+    subtitle: { on: false, decision: '', codec: '', language: '', forced: false, outCodec: '' },
+    transcode: { decision: 'direct play', speed: '', throttled: false, hwRequested: false, hwDecode: false, hwEncode: false, hwDecodeTitle: '', hwEncodeTitle: '' },
+    ...o
+  });
+  return {
+    count: 3, totalBandwidth: 112400,
+    sessions: [
+      base(mv, {
+        user: 'NickLn', grandparent: '', type: 'movie', state: 'playing', sessionKey: '41',
+        player: 'SHIELD Android TV', device: 'Android', resolution: '4k', is4k: true,
+        videoCodec: 'HEVC', dynamicRange: 'HDR10', audioCodec: 'AAC', audioChannels: '5.1',
+        videoDecision: 'transcode', audioDecision: 'transcode', transcode: 'transcode', container: 'MKV', bandwidth: 89600,
+        detail: det({
+          duration: 8760000, viewOffset: 3700000 + elapsed, transcodeProgress: 61,
+          file: { name: 'Sandbox Movie (2010) {imdb-tt0000000} [Remux-2160p][HDR10][TrueHD Atmos 7.1].mkv', size: 64424509440, container: 'MKV', bitrate: 58800, streamContainer: 'MKV', streamBitrate: 40000, qualityProfile: '40 Mbps 4K', optimized: false, synced: false },
+          video: { decision: 'transcode',
+            src: { codec: 'HEVC', profile: 'main 10', level: '153', width: 3840, height: 2160, resolution: '4k', bitrate: 53000, bitDepth: 10, fps: '23.976', dynamicRange: 'HDR10', scan: 'progressive', aspect: '2.39', chroma: '4:2:0', primaries: 'bt2020', colorSpace: 'bt2020nc', trc: 'smpte2084' },
+            out: { codec: 'HEVC', width: 3840, height: 2160, resolution: '4k', bitrate: 37200, bitDepth: 10, fps: '23.976', dynamicRange: 'HDR10' } },
+          audio: { decision: 'transcode',
+            src: { codec: 'TRUEHD', profile: 'atmos', channels: 8, layout: '7.1', bitrate: 5200, sampleRate: 48000, language: 'English' },
+            out: { codec: 'AAC', channels: 6, layout: '5.1', bitrate: 640, language: 'English' } },
+          subtitle: { on: true, decision: 'burn', codec: 'PGS', language: 'English', forced: true, outCodec: '' },
+          transcode: { decision: 'transcode', speed: '1.8', throttled: false, hwRequested: true, hwDecode: true, hwEncode: true, hwDecodeTitle: 'NVDEC', hwEncodeTitle: 'NVENC' },
+          player: { name: 'SHIELD Android TV', product: 'Plex for Android (TV)', productVersion: '10.18.0.1150', platform: 'Android', platformVersion: '11', device: 'SHIELD Android TV', ip: '192.168.1.40', location: 'lan', local: true, secure: true, relayed: false, bandwidth: 89600 }
+        })
+      }),
+      base(ep, {
+        user: 'Maria', grandparent: ep.title, title: 'The Long Night', type: 'episode', state: 'playing', sessionKey: '42',
+        player: 'Living Room', device: 'tvOS', resolution: '1080', is4k: false,
+        videoCodec: 'H264', dynamicRange: 'SDR', audioCodec: 'EAC3', audioChannels: '5.1',
+        videoDecision: 'direct play', audioDecision: 'direct play', transcode: 'direct play', container: 'MKV', bandwidth: 11200,
+        detail: det({
+          duration: 3420000, viewOffset: 600000 + elapsed, season: 2, episode: 5, episodeTitle: 'The Long Night',
+          file: { name: 'Sandbox Show - S02E05 - The Long Night [WEBDL-1080p].mkv', size: 3221225472, container: 'MKV', bitrate: 7400, streamContainer: 'MKV', streamBitrate: 7400, qualityProfile: 'Original', optimized: false, synced: false },
+          video: { decision: 'direct play',
+            src: { codec: 'H264', profile: 'high', level: '41', width: 1920, height: 1080, resolution: '1080p', bitrate: 6600, bitDepth: 8, fps: '24', dynamicRange: 'SDR', scan: 'progressive', aspect: '1.78', chroma: '4:2:0', primaries: 'bt709', colorSpace: 'bt709', trc: 'bt709' },
+            out: { codec: 'H264', width: 1920, height: 1080, resolution: '1080p', bitrate: 6600, bitDepth: 8, fps: '24', dynamicRange: 'SDR' } },
+          audio: { decision: 'direct play',
+            src: { codec: 'EAC3', profile: '', channels: 6, layout: '5.1(side)', bitrate: 640, sampleRate: 48000, language: 'English' },
+            out: { codec: 'EAC3', channels: 6, layout: '5.1(side)', bitrate: 640, language: 'English' } },
+          player: { name: 'Living Room', product: 'Plex for Apple TV', productVersion: '8.40', platform: 'tvOS', platformVersion: '18.1', device: 'Apple TV', ip: '86.12.40.7', location: 'wan', local: false, secure: true, relayed: false, bandwidth: 11200 }
+        })
+      }),
+      base(mv, {
+        user: 'Guest', grandparent: '', type: 'movie', state: 'buffering', sessionKey: '43',
+        player: 'iPhone', device: 'iOS', resolution: '720', is4k: false,
+        videoCodec: 'H264', dynamicRange: 'SDR', audioCodec: 'AAC', audioChannels: 'stereo',
+        videoDecision: 'transcode', audioDecision: 'copy', transcode: 'transcode', container: 'MPEGTS', bandwidth: 3600,
+        detail: det({
+          duration: 8760000, viewOffset: 120000, transcodeProgress: 3,
+          file: { name: 'Sandbox Movie (2010) [Remux-2160p].mkv', size: 64424509440, container: 'MKV', bitrate: 58800, streamContainer: 'MPEGTS', streamBitrate: 3000, qualityProfile: '3 Mbps 720p', optimized: false, synced: false },
+          video: { decision: 'transcode',
+            src: { codec: 'HEVC', profile: 'main 10', level: '153', width: 3840, height: 2160, resolution: '4k', bitrate: 53000, bitDepth: 10, fps: '23.976', dynamicRange: 'HDR10', scan: 'progressive', aspect: '2.39', chroma: '4:2:0', primaries: 'bt2020', colorSpace: 'bt2020nc', trc: 'smpte2084' },
+            out: { codec: 'H264', width: 1280, height: 536, resolution: '720p', bitrate: 2800, bitDepth: 8, fps: '23.976', dynamicRange: 'SDR' } },
+          audio: { decision: 'copy',
+            src: { codec: 'AAC', profile: 'lc', channels: 2, layout: 'stereo', bitrate: 192, sampleRate: 48000, language: 'English' },
+            out: { codec: 'AAC', channels: 2, layout: 'stereo', bitrate: 192, language: 'English' } },
+          transcode: { decision: 'transcode', speed: '0.9', throttled: false, hwRequested: true, hwDecode: false, hwEncode: true, hwDecodeTitle: '', hwEncodeTitle: 'NVENC' },
+          player: { name: 'iPhone', product: 'Plex for iOS', productVersion: '2024.20', platform: 'iOS', platformVersion: '18.0', device: 'iPhone', ip: '10.8.0.6', location: 'wan', local: false, secure: true, relayed: true, bandwidth: 3600 }
+        })
+      })
+    ]
+  };
+}
+
+
+// Live › History / Stats drill-down fixtures, in RAW Tautulli shape and fed
+// through the real mappers in server/services/tautulli.js (pure functions; the
+// module only reads config when a Tautulli call is made, which never happens
+// here). Covers every transcode cause the analysis sheet explains.
+const TAUT = await import('../../server/services/tautulli.js');
+const H_USERS = [[11, 'alex'], [12, 'NickLn'], [13, 'Maria'], [14, 'Guest']];
+const H_PLAYERS = [['webOS', 'LG OLED65C1', 'Plex for LG'], ['Tizen', 'Samsung TV', 'Plex for Samsung'], ['Android', 'Pixel 8', 'Plex for Android'], ['iOS', 'iPhone', 'Plex for iOS']];
+// [video_decision, audio_decision, transcode_decision, extra raw stream fields]
+const H_PROFILES = [
+  ['direct play', 'direct play', 'direct play', {}],
+  ['copy', 'copy', 'copy', { stream_container: 'mpegts' }],
+  ['transcode', 'copy', 'transcode', { subtitles: 1, subtitle_codec: 'pgs', stream_subtitle_decision: 'burn', stream_video_codec: 'h264', stream_video_full_resolution: '1080p', video_full_resolution: '1080p', video_codec: 'h264' }],
+  ['transcode', 'direct play', 'transcode', { quality_profile: '4 Mbps 720p', stream_video_codec: 'h264', stream_video_full_resolution: '720p', stream_video_bitrate: 3600, transcode_hw_decoding: 1, transcode_hw_encoding: 1 }],
+  ['transcode', 'transcode', 'transcode', { stream_video_codec: 'h264', stream_video_dynamic_range: 'SDR', stream_audio_codec: 'aac', stream_audio_channels: 2 }],
+  ['direct play', 'transcode', 'transcode', { audio_codec: 'truehd', audio_channels: 8, stream_audio_codec: 'eac3', stream_audio_channels: 6 }]
+];
+const H_NOW = Math.floor(Date.now() / 1000);
+const H_RAW = [];
+const H_STREAM = new Map();
+for (let i = 0; i < 140; i++) {
+  const ep = i % 3 !== 0;
+  const it = allItems.filter((x) => x.media === (ep ? 'tv' : 'movie'))[i % 7];
+  const [uid, uname] = H_USERS[i % H_USERS.length];
+  const [platform, player, product] = H_PLAYERS[(i * 7) % H_PLAYERS.length];
+  const [vd, ad, td, extra] = H_PROFILES[(i * 5) % H_PROFILES.length];
+  const date = H_NOW - i * 5 * 3600 - 1200;
+  const dur = ep ? 2400 + (i % 5) * 120 : 6000 + (i % 4) * 600;
+  const rowId = 9000 + i;
+  H_RAW.push({
+    row_id: rowId, date, started: date, stopped: date + dur + 300, duration: dur, play_duration: dur, paused_counter: i % 4 ? 300 : 0,
+    user_id: uid, friendly_name: uname, platform, player, product, ip_address: i % 4 === 3 ? '86.12.40.7' : '192.168.1.' + (20 + (i % 9)),
+    location: i % 4 === 3 ? 'wan' : 'lan', secure: 1, relayed: 0,
+    media_type: ep ? 'episode' : 'movie', rating_key: 500 + i, grandparent_rating_key: ep ? 100 + (i % 7) : '',
+    title: ep ? `Episode ${(i % 10) + 1}` : it.title, grandparent_title: ep ? it.title : '', full_title: it.title,
+    year: it.year, media_index: (i % 10) + 1, parent_media_index: (i % 3) + 1,
+    transcode_decision: td, percent_complete: 40 + ((i * 13) % 61), watched_status: i % 3 ? 1 : 0
+  });
+  H_STREAM.set(String(rowId), {
+    container: 'mkv', bitrate: 24000, video_codec: 'hevc', video_full_resolution: '4k', video_width: 3840, video_height: 2160, video_bitrate: 22000,
+    video_dynamic_range: 'HDR10', video_framerate: '24p', audio_codec: 'eac3', audio_channels: 6, audio_bitrate: 640,
+    stream_container: 'mkv', stream_bitrate: td === 'transcode' ? 8000 : 24000, stream_video_decision: vd, stream_audio_decision: ad,
+    stream_video_codec: 'hevc', stream_video_full_resolution: '4k', stream_video_bitrate: td === 'transcode' ? 7400 : 22000, stream_video_dynamic_range: 'HDR10',
+    stream_audio_codec: 'eac3', stream_audio_channels: 6, quality_profile: 'Original', transcode_decision: td, ...extra
+  });
+}
+function liveHistory(url) {
+  const q = url.searchParams;
+  const after = H_NOW - Number(q.get('days') || 30) * 86400;
+  const rows = H_RAW.filter((r) => r.date >= after
+    && (!q.get('user') || String(r.user_id) === q.get('user'))
+    && (!q.get('ratingKey') || String(r.rating_key) === q.get('ratingKey'))
+    && (!q.get('showKey') || String(r.grandparent_rating_key) === q.get('showKey'))
+    && (!q.get('media') || r.media_type === q.get('media'))
+    && (!q.get('decision') || r.transcode_decision === q.get('decision'))).map(TAUT.historyRow);
+  const posterOf = (name) => allItems.find((x) => x.title === name);
+  const decorate = (r) => { const m = posterOf(r.title || r.name); return { ...r, poster: m?.poster || null, tmdbId: m?.id || null, tmdbMedia: m?.media || null, backdrop: m?.backdrop || null }; };
+  const start = Number(q.get('start') || 0), length = Number(q.get('length') || 50);
+  const out = { total: rows.length, rows: rows.slice(start, start + length).map(decorate) };
+  if (q.get('summary') === '1') {
+    out.summary = TAUT.summarize(rows);
+    out.summary.titleCount = out.summary.titles.length;
+    out.summary.titles = out.summary.titles.slice(0, 12).map(decorate);
+  }
+  return out;
+}
+function liveStats() {
+  const mv = allItems.filter((x) => x.media === 'movie').slice(0, 7);
+  const tv = allItems.filter((x) => x.media === 'tv').slice(0, 7);
+  return {
+    days: 30,
+    topMovies: mv.map((m, i) => ({ name: m.title, total: 7 - i, year: m.year, ratingKey: H_RAW.find((r) => r.media_type === 'movie' && r.title === m.title)?.rating_key || null, poster: m.poster, id: m.id, media: 'movie' })),
+    topTv: tv.map((m, i) => ({ name: m.title, total: 30 - i * 3, year: m.year, ratingKey: 100 + i, poster: m.poster, id: m.id, media: 'tv' })),
+    topUsers: H_USERS.map(([id, name], i) => ({ name, total: 50 - i * 9, userId: id, thumb: '' })),
+    topPlatforms: H_PLAYERS.map(([p], i) => ({ name: p, total: 80 - i * 15 }))
+  };
+}
+
 function escapeXml(s) {
   return String(s).replace(/[<>&'"]/g, (c) => (
     { '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]
@@ -143,6 +315,8 @@ function api(pathname, url, body) {
   if (pathname === '/api/auth/me') return { ok: true, user: { username: 'Sandbox', name: 'Sandbox', role: 'admin' } };
   if (pathname === '/api/auth/profiles') return { profiles: [{ id: 'Sandbox', name: 'Sandbox', username: 'Sandbox', role: 'admin' }] };
   if (pathname === '/api/status') return { ok: true, services: [] };
+  // Request counter, to prove prefetch + click share ONE detail request.
+  if (pathname === '/api/sandbox/hits') return apiHits;
   if (pathname === '/api/discover/home') return { rows, cold: false };
   if (pathname === '/api/discover/rows') return { rows };
   // renderCategory() reads trend.movies / trend.tv, and the IMDb rail is a
@@ -157,7 +331,11 @@ function api(pathname, url, body) {
     return { items: pool.slice(0, 250) };
   }
   if (pathname === '/api/discover/boxoffice') return { items: allItems.slice(0, 20) };
-  if (pathname === '/api/discover/search') return { items: allItems.slice(0, 20) };
+  // The real route returns a bare array of mini items, filtered by the query.
+  if (pathname === '/api/discover/search') {
+    const q = (url.searchParams.get('q') || '').toLowerCase();
+    return allItems.filter((it) => (it.title || '').toLowerCase().includes(q)).slice(0, 20);
+  }
 
   if (pathname === '/api/discover/media-status') {
     const statuses = {};
@@ -179,6 +357,18 @@ function api(pathname, url, body) {
     return { ratings, urls };
   }
 
+  // Two-phase AI Suggestions: rule-based + pending for the first AI_PENDING_MS
+  // after the first request, then the "AI-ranked" list (reversed, with reasons)
+  // so the swap is visible. ?reset=1 restarts the clock.
+  if (pathname === '/api/discover/ai-suggest') {
+    if (url.searchParams.get('reset') === '1') aiFirstSeen = 0;
+    if (!aiFirstSeen) aiFirstSeen = Date.now();
+    const pending = Date.now() - aiFirstSeen < AI_PENDING_MS;
+    const base = allItems.slice(0, 24);
+    const items = pending ? base : base.slice().reverse().map((it) => ({ ...it, why: 'Sandbox AI reason' }));
+    return { source: pending ? 'rules' : 'ai', days: 60, basedOn: ['Dune', 'Severance'], items, pending, aiConfigured: true, tuning: { historyDays: 60 } };
+  }
+
   const detail = pathname.match(/^\/api\/discover\/(movie|tv)\/(\d+)$/);
   if (detail) {
     const rec = byId.get(detail[2]);
@@ -187,19 +377,43 @@ function api(pathname, url, body) {
       ...rec,
       runtime: 118,
       genres: ['Drama', 'Thriller', 'Crime'],
+      // Opt-in (--trailers): embeds a real YouTube iframe, so it needs network.
+      trailerKey: process.argv.includes('--trailers') ? 'aqz-KE-bpKQ' : null,
       inLibrary: Number(detail[2]) % 3 === 0,
       isRequested: false,
       seriesStatus: detail[1] === 'tv' ? 'ended' : null,
-      cast: allItems.slice(0, 14).map((c, i) => ({ ...c, job: 'Actor', character: `Role ${i}` })),
+      // Real cast shape (name/photo/character). Every fourth has no headshot so
+      // the initials placeholder is exercised alongside photos.
+      cast: allItems.slice(0, 14).map((c, i) => ({ id: 9000 + i, name: c.title, photo: i % 4 === 3 ? null : c.poster, character: i === 2 ? 'Sergeant Davis Tubbs the Second' : `Role ${i}`, job: 'Actor' })),
       recommendations: allItems.slice(20, 50),
       similar: allItems.slice(50, 80),
       productionCountries: [{ iso_31661: 'US', name: 'United States' }]
     };
   }
 
+  if (pathname === '/api/discover/live/now') return liveNow();
+  if (pathname === '/api/discover/live/stats') return liveStats();
+  if (pathname === '/api/discover/live/history') return liveHistory(url);
+  if (pathname === '/api/discover/live/users') return { users: H_USERS.map(([id, name]) => ({ id, name })) };
+  if (pathname.startsWith('/api/discover/live/play/')) { const raw = H_STREAM.get(pathname.split('/').pop()); return raw ? { detail: TAUT.sessionDetail(raw) } : { error: 'no stream data for this play' }; }
+
   if (pathname.startsWith('/api/discover/person/')) return { ...allItems[0], knownFor: allItems.slice(0, 20) };
   if (pathname === '/api/request/options') return { profiles: [], rootFolders: [], tags: [] };
   if (pathname === '/api/settings/users') return { users: [] };
+
+  // Requests tab — one of every kind the audit log can now produce, including
+  // the Discord-as-admin case behind the unexplained additions.
+  if (pathname === '/api/requests') {
+    const h = 3600e3, now = Date.now();
+    return { ok: true, admin: true, requests: [
+      { id: 'r1', status: 'pending', media: 'movie', tmdbId: 603, title: 'The Matrix', by: 'maria', byRole: 'user', source: 'app', at: now - 1 * h },
+      { id: 'r2', status: 'approved', decidedBy: 'auto', result: 'added', media: 'movie', tmdbId: 550, title: 'Fight Club', by: 'nick', byRole: 'admin', source: 'discord', external: '1', at: now - 2 * h },
+      { id: 'r3', status: 'approved', decidedBy: 'auto', result: 'added', media: 'movie', tmdbId: 11, title: 'Star Wars', by: 'nick', byRole: 'admin', source: 'collection', collection: 'Star Wars Collection', at: now - 3 * h },
+      { id: 'r4', status: 'failed', decidedBy: 'auto', result: 'failed', media: 'tv', tmdbId: 1399, title: 'Game of Thrones', by: 'Requestrr Bot', byRole: 'external', source: 'discord', external: null, error: 'Sonarr: root folder missing', at: now - 4 * h },
+      { id: 'r5', status: 'approved', decidedBy: 'nick', media: 'tv', tmdbId: 1396, title: '<img src=x onerror=alert(1)>', by: '<b>eve</b>', byRole: 'user', source: 'app', at: now - 5 * h },
+      { id: 'r6', status: 'declined', decidedBy: 'nick', media: 'movie', tmdbId: 1, title: 'Declined Movie', by: 'maria', byRole: 'user', source: 'app', at: now - 6 * h }
+    ]};
+  }
 
   // Settings pane fixtures. Shape mirrors config.js DEFAULTS (post-redacted()),
   // enough for renderTab() to build every pane without throwing.
@@ -281,7 +495,11 @@ const server = http.createServer((req, res) => {
     return req.on('end', () => {
       let body = null;
       try { body = raw ? JSON.parse(raw) : null; } catch { /* not json */ }
-      send(200, MIME['.json'], JSON.stringify(api(pathname, url, body)));
+      const payload = JSON.stringify(api(pathname, url, body));
+      const slow = /^\/api\/discover\/(movie|tv)\/\d+$/.test(pathname) ? DETAIL_DELAY_MS
+        : (pathname === '/api/discover/home' || pathname === '/api/discover/rows') ? HOME_DELAY_MS : 0;
+      if (slow) apiHits.detail++;
+      setTimeout(() => send(200, MIME['.json'], payload), slow);
     });
   }
 

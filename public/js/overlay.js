@@ -9,7 +9,7 @@
 // Everything here is imported by the same unversioned specifier from every
 // caller, so there is exactly one instance.
 
-const OVERLAY_IDS = ['modal', 'requestModal', 'plexModal', 'profileOverlay'];
+const OVERLAY_IDS = ['modal', 'requestModal', 'plexModal', 'profileOverlay', 'streamModal', 'liveSheet'];
 
 export function anyOverlayOpen() {
   return OVERLAY_IDS.some((id) => {
@@ -93,15 +93,20 @@ export function releaseScrollLock(key = 'modal') {
 // Hard reset — used when we close everything at once and the key set may be
 // out of step (e.g. a module hid an overlay without telling us).
 export function resetScrollLock() {
+  // Only restore the saved offset if the body is actually pinned right now.
+  // showView() calls this on EVERY navigation, and restoring unconditionally
+  // re-applied the offset of whichever overlay was opened last — open a title
+  // 3000px down Home, close it, tap Movies, and Movies opened 3000px down.
+  const pinned = document.body.style.position === 'fixed';
   _locks.clear();
-  unpinBody();
+  unpinBody(pinned);
 }
 
-function unpinBody() {
+function unpinBody(restore = true) {
   const b = document.body.style;
   b.position = b.top = b.left = b.right = b.width = b.overflow = '';
   document.body.classList.remove('overlay-open');
-  window.scrollTo(0, _lockedY);
+  if (restore) window.scrollTo(0, _lockedY);
 }
 
 // ---------- swipe-down-to-dismiss ----------

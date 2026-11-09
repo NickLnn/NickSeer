@@ -1,4 +1,5 @@
 import express from '../mini.js';
+import { logDirect, roleOf } from '../lib/requestlog.js';
 import { load, setRequests } from '../config.js';
 import crypto from 'crypto';
 import auth from '../services/auth.js';
@@ -579,6 +580,9 @@ router.post('/request', async (req, res) => {
       title: title,
       poster: poster,
       by: username,
+      byRole: userObj ? roleOf(userObj) : 'external',
+      source: 'discord',
+      external: xApiUser ? String(xApiUser) : null,
       at: Date.now(),
       qualityProfileId: null,
       rootFolder: '',
@@ -593,18 +597,33 @@ router.post('/request', async (req, res) => {
     return res.json({ id: Math.floor(Math.random() * 100000), status: 1, media: { tmdbId: resolvedTmdbId, status: 2 } });
   }
   
+  // Requestrr requests that bypass the queue used to leave no trace at all —
+  // and because every mock user reports discordId: null, Requestrr falls back
+  // to its "default user", which maps onto a real (often admin) account. Record
+  // the raw X-API-User it sent so the log shows what actually happened.
+  const logBase = {
+    media: mediaType, tmdbId: resolvedTmdbId, tvdbId: resolvedTvdbId || null,
+    title, poster, by: username,
+    byRole: userObj ? roleOf(userObj) : 'external',
+    source: 'discord',
+    external: xApiUser ? String(xApiUser) : null,
+    seasons: seasons || []
+  };
   try {
     const idToUse = (mediaType === 'tv' && resolvedTvdbId) ? `tvdb:${resolvedTvdbId}` : resolvedTmdbId;
-    await arr.add(kind, idToUse, { seasons });
+    const added = await arr.add(kind, idToUse, { seasons });
+    logDirect(logBase, { kind: 'added', arrId: added?.id });
     telegram.notify('autoApproved', { title, poster, media: mediaType, tmdbId: resolvedTmdbId, tvdbId: resolvedTvdbId, by: username, seasons });
     discord.notify('autoApproved', { title, poster, media: mediaType, tmdbId: resolvedTmdbId, tvdbId: resolvedTvdbId, by: username, seasons });
     res.json({ id: Math.floor(Math.random() * 100000), status: 2, media: { tmdbId: resolvedTmdbId, status: 5 } }); // 5 = Available
   } catch (e) {
     if (e.message && e.message.toLowerCase().includes('already')) {
+      logDirect(logBase, { kind: 'exists' });
       telegram.notify('available', { title, poster, media: mediaType, tmdbId: resolvedTmdbId, tvdbId: resolvedTvdbId, by: username });
       discord.notify('available', { title, poster, media: mediaType, tmdbId: resolvedTmdbId, tvdbId: resolvedTvdbId, by: username });
       return res.json({ id: Math.floor(Math.random() * 100000), status: 2, media: { tmdbId: resolvedTmdbId, status: 3 } }); // 3 = Processing / Available
     }
+    logDirect(logBase, { kind: 'failed', error: e.message });
     telegram.notify('failed', { title, poster, media: mediaType, tmdbId: resolvedTmdbId, tvdbId: resolvedTvdbId, by: username });
     discord.notify('failed', { title, poster, media: mediaType, tmdbId: resolvedTmdbId, tvdbId: resolvedTvdbId, by: username });
     res.status(500).json({ error: e.message });
