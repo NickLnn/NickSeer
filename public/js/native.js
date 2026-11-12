@@ -185,3 +185,75 @@ if ('serviceWorker' in navigator) {
     if (sw.controller) sw.controller.postMessage({ type: 'ns-check' });
   });
 }
+
+// ---------------------------------------------------------------------------
+// 5) Open Plex and IMDb links in their apps (iPhone / iPad)
+// ---------------------------------------------------------------------------
+// The links in the app are ordinary web addresses. On iOS those open a browser
+// page even when the Plex or IMDb app is installed, so a tap is rewritten to
+// the app's own address:
+//   https://app.plex.tv/desktop/#!/server/<machine>/details?key=%2Flibrary%2Fmetadata%2F<n>
+//     -> plex://preplay/?metadataKey=%2Flibrary%2Fmetadata%2F<n>&server=<machine>
+//   https://www.imdb.com/title/tt1234567/
+//     -> imdb:///title/tt1234567/
+// If the app does not take over within 1.5s (the page is still in front), the
+// normal web link is opened instead, and that app is skipped for 30 days so
+// someone without it does not get a failed attempt on every tap.
+// One capture-phase listener covers every such link, present and future.
+export const appLinks = {
+  isIOS() {
+    const ua = navigator.userAgent || '';
+    return /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  },
+  // -> { app, appUrl } or null
+  resolve(href) {
+    let u; try { u = new URL(href, location.href); } catch { return null; }
+    if (/(^|\.)imdb\.com$/i.test(u.hostname)) {
+      const m = /^\/title\/(tt\d+)/.exec(u.pathname);
+      return m ? { app: 'imdb', appUrl: `imdb:///title/${m[1]}/` } : null;
+    }
+    if (/^app\.plex\.tv$/i.test(u.hostname)) {
+      // The route lives in the fragment: #!/server/<machine>/details?key=<encoded>
+      const m = /server\/([^/?]+)\/details\?(.*)$/.exec(u.hash || '');
+      if (!m) return null;
+      const key = new URLSearchParams(m[2]).get('key');
+      if (!key || !/^\/library\/metadata\/\d+$/.test(key)) return null;
+      return { app: 'plex', appUrl: `plex://preplay/?metadataKey=${encodeURIComponent(key)}&server=${encodeURIComponent(m[1])}` };
+    }
+    return null;
+  },
+  skipped(app) {
+    try { return Date.now() - Number(localStorage.getItem('ns_noapp_' + app) || 0) < 30 * 86400000; } catch { return false; }
+  },
+  open(webUrl, target) {
+    const w = window.open(webUrl, target || '_blank', 'noopener');
+    if (!w) location.href = webUrl;
+  },
+  // Returns true when the tap was taken over.
+  handle(a) {
+    if (!this.isIOS()) return false;
+    const r = this.resolve(a.href);
+    if (!r || this.skipped(r.app)) return false;
+    const webUrl = a.href, target = a.target;
+    let left = false;
+    const onHide = () => { if (document.hidden) left = true; };
+    document.addEventListener('visibilitychange', onHide);
+    window.addEventListener('pagehide', onHide);
+    location.href = r.appUrl;
+    setTimeout(() => {
+      document.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('pagehide', onHide);
+      if (left || document.hidden) return;             // the app opened
+      try { localStorage.setItem('ns_noapp_' + r.app, String(Date.now())); } catch { /* ignore */ }
+      this.open(webUrl, target);
+    }, 1500);
+    return true;
+  }
+};
+
+document.addEventListener('click', (e) => {
+  if (e.defaultPrevented || e.button > 0 || e.metaKey || e.ctrlKey) return;
+  const a = e.target.closest && e.target.closest('a[href]');
+  if (!a) return;
+  if (appLinks.handle(a)) { e.preventDefault(); e.stopPropagation(); }
+}, true);

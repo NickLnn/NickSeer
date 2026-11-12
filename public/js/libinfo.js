@@ -89,8 +89,22 @@ const CSS = `
     .li-poster{width:78px;border-radius:10px;}
     .li-body{padding:4px 14px 24px;gap:12px;}
     .li-box{padding:14px;}
-    .li-grid{grid-template-columns:1fr;}
+    /* The sheet could be dragged sideways on a phone and sat off-centre
+       (Nick, 2026-11-12). A grid track of plain 1fr is minmax(auto,1fr): it
+       refuses to shrink below its content's widest unbreakable line, so one
+       long subtitle name widened the box past the screen, and overflow-y:auto
+       on the card made that scrollable. Tracks and boxes may now shrink, the
+       table gets fixed columns so long names wrap, and the card itself only
+       ever pans vertically. */
+    .li-card{overflow-x:hidden;touch-action:pan-y;}
+    .li-body>*,.li-box,.li-grid>*{min-width:0;}
+    .li-grid{grid-template-columns:minmax(0,1fr);}
     .li-tiles{grid-template-columns:repeat(2,minmax(0,1fr));}
+    .li-tbl{table-layout:fixed;}
+    .li-tbl th:nth-child(2){width:64px;}
+    .li-tbl th:last-child{width:98px;}
+    .li-tbl td{overflow-wrap:anywhere;}
+    .li-file,.li-sub,.li-h{overflow-wrap:anywhere;}
     .li-tbl .hide-m{display:none;}
     .li-ep{grid-template-columns:36px 1fr auto;}
   }

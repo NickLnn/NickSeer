@@ -3973,3 +3973,38 @@ html:not([data-input="keys"]) .icon-btn:focus-visible {
   }
   .hero-content { text-shadow: 0 2px 14px rgba(0, 0, 0, .55); }
 }
+
+/* ==========================================================================
+   Phone slideshow: keep the artwork clear of the top bar — 2026-11-12 (late)
+   With the poster running to the very top, its top edge — where the faces
+   are — sat behind the status bar and the search field (Nick's screenshot,
+   "Shaft": the head is under the search box), and the bar's translucent
+   controls became hard to read over a bright picture.
+
+   The poster now starts just under the bar and fades in. The strip behind the
+   bar is plain page colour, so the bar reads as a solid header and the fade
+   means there is still no visible edge.
+   ========================================================================== */
+@media (max-width: 768px) {
+  .hero.hero-portrait .hero-slide {
+    background-repeat: no-repeat !important;
+    background-size: 100% auto !important;          /* full width, natural 2:3 height */
+    background-position: center calc(env(safe-area-inset-top, 0px) + 50px) !important;
+  }
+  .hero.hero-portrait .hero-slide::after {
+    background: linear-gradient(180deg,
+      var(--bg) 0,
+      var(--bg) calc(env(safe-area-inset-top, 0px) + 40px),
+      rgba(10, 10, 15, 0.45) calc(env(safe-area-inset-top, 0px) + 72px),
+      rgba(10, 10, 15, 0) calc(env(safe-area-inset-top, 0px) + 112px),
+      rgba(10, 10, 15, 0) 50%,
+      rgba(10, 10, 15, 0.86) 76%,
+      var(--bg) 97%) !important;
+  }
+
+  /* Poster cards are ~136px wide here: the status badge (top-right) ran into
+     the rating chip (top-left) — "★ 6.4" under "Requested". It only became
+     visible once the badges started loading. Move it to the bottom corner. */
+  .card .card-status-badge { top: auto; bottom: 8px; right: 8px; left: auto; }
+  .card.has-status .why-chip { top: 8px; }
+}
