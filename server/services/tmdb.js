@@ -171,15 +171,68 @@ export async function newlyAdded(providerKey, media = 'movie', limit = 20) {
   if (!r.items.length && media === 'movie') r = await providerDiscover(providerKey, 'tv', mk('tv'));
   return { provider: svc.label, items: r.items.slice(0, limit), media: r.usedMedia };
 }
+// ---------------------------------------------------------------------------
+// "Coming to <service>"
+// ---------------------------------------------------------------------------
+// TMDB's watch-provider data only lists a title on a service once it is
+// ALREADY streaming there, so `with_watch_providers` + "release date in the
+// future" returns almost nothing. Measured for region GR on 2026-11-12:
+//   movies: Prime 1, Apple 1, Disney+ 6, HBO Max 6   TV: Apple 2, Disney+ 9
+// and nearly all of those were the old fallback — titles released in the last
+// 45 days, shown under a "Coming to…" heading.
+//
+// What TMDB does know in advance is WHO is making a title: the network a
+// series is ordered by, and the studio behind a film. Those are what feed the
+// rows now (ids confirmed against /network/{id} and /search/company):
+const UPCOMING_SOURCES = {
+  netflix:   { networks: [213],        companies: [178464, 185004, 198834, 145174, 171251] }, // Netflix (US/JP/GB), Netflix International Pictures, Netflix Animation
+  disney:    { networks: [2739],       companies: [2, 3, 420, 1, 6125, 127928, 127929] },  // Disney, Pixar, Marvel, Lucasfilm, WDAS, 20th Century, Searchlight
+  amazon:    { networks: [1024],       companies: [210099] },                              // Prime Video / Amazon MGM Studios
+  max:       { networks: [49, 3186],   companies: [174, 7429, 12, 184898] },               // HBO, HBO Max / Warner Bros., HBO Films, New Line, DC Studios
+  apple:     { networks: [2552],       companies: [194232] },                              // Apple TV / Apple Studios
+  paramount: { networks: [4330],       companies: [4] },                                   // Paramount+ / Paramount Pictures
+  peacock:   { networks: [3353],       companies: [33] }                                   // Peacock / Universal Pictures
+};
+// Talk, News, Reality, Soap: always "airing soon", never what this row is for.
+const UPCOMING_TV_SKIP_GENRES = '10767,10763,10764,10766';
+
 export async function comingSoonProvider(providerKey, media = 'movie', limit = 20) {
   const svc = STREAMING.find((s) => s.key === providerKey);
-  const strict = (m) => { const dk = m === 'tv' ? 'first_air_date' : 'primary_release_date'; const p = { sort_by: `${dk}.asc`, page: 1 }; p[`${dk}.gte`] = today(); return p; };
-  const wide = (m) => { const dk = m === 'tv' ? 'first_air_date' : 'primary_release_date'; const p = { sort_by: `${dk}.desc`, page: 1 }; p[`${dk}.gte`] = daysAgo(45); p[`${dk}.lte`] = daysAhead(365); return p; };
-  const popular = { sort_by: 'popularity.desc', 'vote_count.gte': 5, page: 1 };
-  const tryMedia = async (m) => { let r = await providerDiscover(providerKey, m, strict(m)); if (!r.items.length) r = await providerDiscover(providerKey, m, wide(m)); if (!r.items.length) r = await providerDiscover(providerKey, m, popular); return r; };
-  let r = await tryMedia(media);
-  if (!r.items.length && media === 'movie') r = await tryMedia('tv');
-  return { provider: svc.label, items: r.items.slice(0, limit), media: r.usedMedia };
+  const src = UPCOMING_SOURCES[providerKey];
+  // A service that does not exist in the user's region gets no row.
+  const pid = await providerId(providerKey, media).catch(() => null);
+  if (!svc || !src || !pid) return { provider: svc ? svc.label : providerKey, items: [], media };
+
+  const t = today();
+  const lists = [];
+  const grab = (m, params) => discover(m, params).then((d) => d.results || []).catch(() => []);
+
+  // 1) Anything TMDB already dates in the future on the service itself (rare, but exact).
+  const dk = media === 'tv' ? 'first_air_date' : 'primary_release_date';
+  lists.push(providerDiscover(providerKey, media, { sort_by: 'popularity.desc', page: 1, [`${dk}.gte`]: t }).then((r) => r.items).catch(() => []));
+
+  if (media === 'tv') {
+    const nets = src.networks.join('|');
+    // 2) Brand-new series ordered by the service.
+    lists.push(grab('tv', { with_networks: nets, 'first_air_date.gte': t, sort_by: 'popularity.desc', without_genres: UPCOMING_TV_SKIP_GENRES, page: 1 }));
+    // 3) Returning series with episodes dated in the next 8 months (new seasons).
+    lists.push(grab('tv', { with_networks: nets, 'air_date.gte': t, 'air_date.lte': daysAhead(240), sort_by: 'popularity.desc', without_genres: UPCOMING_TV_SKIP_GENRES, page: 1 }));
+  } else {
+    // 2) Films from the service's own studios, releasing within 18 months.
+    lists.push(grab('movie', { with_companies: src.companies.join('|'), 'primary_release_date.gte': t, 'primary_release_date.lte': daysAhead(540), sort_by: 'popularity.desc', page: 1 }));
+  }
+
+  const seen = new Set();
+  const items = [];
+  for (const list of await Promise.all(lists)) {
+    for (const it of list) {
+      // No artwork = an empty tile; that was the other half of "very little info".
+      if (!it || !it.poster_path || seen.has(it.id)) continue;
+      seen.add(it.id);
+      items.push(it);
+    }
+  }
+  return { provider: svc.label, items: items.slice(0, limit), media };
 }
 
 export async function inCinemasTop(limit = 10) {
