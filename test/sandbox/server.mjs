@@ -100,7 +100,40 @@ function makeItem(title, year, imdb, tmdb, media = 'movie') {
 }
 
 const rows = [];
-for (let r = 0; r < ROWS; r++) {
+
+// --real-art : fill the rows with real titles and artwork from TMDB instead of
+// the generated fixtures. For taking screenshots only. This is the ONE mode
+// that reads config (the TMDB key) and uses the network; every stubbed service
+// (Plex, Radarr, Sonarr, notifications) stays stubbed, and nothing is written.
+const REAL_ART = process.argv.includes('--real-art');
+if (REAL_ART) {
+  const tmdb = (await import('../../server/services/tmdb.js')).default;
+  const real = (r, media) => {
+    const it = makeItem(r.title || r.name, String(r.release_date || r.first_air_date || '').slice(0, 4), Math.round((r.vote_average || 0) * 10) / 10 || null, Math.round((r.vote_average || 0) * 10) / 10, media);
+    it.poster = tmdb.img(r.poster_path, 'w500');
+    it.backdrop = tmdb.img(r.backdrop_path, 'w1280');
+    it.overview = r.overview || '';
+    return it;
+  };
+  const lists = [
+    ['Trending Movies', 'movie', () => tmdb.trending('movie', 'week')],
+    ['Trending Series', 'tv', () => tmdb.trending('tv', 'week')],
+    ['Popular Movies', 'movie', () => tmdb.popular('movie')],
+    ['Popular Series', 'tv', () => tmdb.popular('tv')],
+    ['Top Rated Movies', 'movie', () => tmdb.topRated('movie')],
+    ['Top Rated Series', 'tv', () => tmdb.topRated('tv')]
+  ];
+  for (const [title, media, fn] of lists) {
+    try {
+      const d = await fn();
+      const items = (d.results || []).filter((r) => r.poster_path && r.backdrop_path && r.overview).map((r) => real(r, media));
+      if (items.length) rows.push({ title, items });
+    } catch (e) { console.warn('[sandbox] --real-art:', title, e.message); }
+  }
+}
+
+const USE_FIXTURES = rows.length === 0;   // real art unavailable or not asked for
+for (let r = 0; r < ROWS && USE_FIXTURES; r++) {
   const items = [];
   // Every row leads with the colliding titles so they are on screen immediately.
   for (const [t, y, i, m] of COLLIDERS) items.push(makeItem(t, y, i, m));

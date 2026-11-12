@@ -1367,7 +1367,10 @@ function heroSlideshow(items) {
     if (narrow) content.appendChild(dots);
     content.appendChild(el('div', { class: 'hero-actions' }, [el('button', { class: 'btn btn-primary', 'data-nav': '', onclick: () => openDetail(it), onpointerdown: () => prefetchDetail(it) }, '▶  Trailer & Details'), heroReqBtn]));
     loadSlide(idx); loadSlide((idx + 1) % items.length); unloadFar(idx);
-    slides.forEach((s, i) => s.classList.toggle('on', i === idx));
+    // fixes.js pins an inline `opacity: 1` on whichever slide it first sees.
+    // That slide then stayed visible underneath every other one whenever its
+    // image was loaded, showing through the faded edges of the slide on top.
+    slides.forEach((s, i) => { s.classList.toggle('on', i === idx); s.style.opacity = ''; });
     dotEls.forEach((d, i) => d.classList.toggle('on', i === idx));
   };
   const go = (i) => { idx = (i + items.length) % items.length; paint(); restart(); };

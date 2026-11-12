@@ -6,6 +6,24 @@ A modern, self-hosted discovery hub and request manager for **Plex** & **Jellyfi
 
 ---
 
+## 📸 Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/desktop-home.jpg" alt="NickSeer home screen on desktop: a featured title with its artwork, rating, description and Request button" width="800" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/desktop-rows.jpg" alt="Poster rows on desktop showing IMDb ratings and In Library / Requested badges" width="800" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/phone-home.jpg" alt="NickSeer installed as an app on a phone: portrait artwork, bottom tab bar and poster row" width="300" />
+</p>
+
+<sub>Artwork and titles are provided by TMDB and belong to their respective owners.</sub>
+
+---
+
 ## ✨ Key Features
 
 ### 👑 1. Multi-Server Plex Integration & Ownership Verification
@@ -18,6 +36,13 @@ A modern, self-hosted discovery hub and request manager for **Plex** & **Jellyfi
 - **Sleek Minimalist Navigation:** Modern vector SVG bottom navigation bar with Apple TV / Netflix styling.
 - **Overseerr-Style Season Selector:** Interactive season request table with individual episode counts, master toggles, and smooth bottom-sheet modals.
 - **Swipe-to-Dismiss Sheets:** Detail, person and request sheets can be dragged down to close, with the backdrop fading as you drag.
+- **Pull to Refresh:** pull down from the top of any list view to reload it.
+- **Tabs that behave like an app:** each tab remembers where you were scrolled to, tab changes cross-fade, and tapping the tab you are already on jumps back to the top.
+- **Portrait artwork on phones:** the slideshow uses the tall poster on small screens, placed below the top bar so faces are not hidden behind it.
+- **Share sheet:** share any title from its detail sheet with the native iOS / Android share menu.
+- **Opens Plex and IMDb apps (iPhone / iPad):** "Open in Plex" and IMDb links open the installed app on that title, and fall back to the web page if the app is not installed.
+- **App icon badge:** admins see the number of requests waiting for approval on the Home Screen icon.
+- **Updates itself:** the installed app notices when a newer version is deployed and reloads at a safe moment — no need to close and reopen it.
 - **Tuned for real phones:** posters are requested at the size they are actually drawn, long rails are capped on small screens, and rating badges are painted only for cards near the viewport — together these cut decoded image memory on the Movies/TV tabs by roughly 75% and keep scrolling at a steady frame rate.
 - **Consistent Press Feedback:** a single motion system across every button, chip and nav item — 48px minimum touch targets, one spring curve, and a full `prefers-reduced-motion` fallback.
 - **Cloudflare Tunnel Hardened:** Real client IP extraction (`CF-Connecting-IP`), brute-force login rate limiting, security headers, and 24-hour CDN edge caching for static assets.
@@ -34,7 +59,9 @@ A modern, self-hosted discovery hub and request manager for **Plex** & **Jellyfi
 ### 👥 5. Netflix-Style Multi-User Profiles & RBAC
 - **"Who's Watching?" Profile Picker:** Switch between family profiles seamlessly.
 - **Role-Based Access Control (RBAC):** Admin users manage users, approvals, and server settings. Standard user accounts (family/friends) are automatically restricted from viewing backend configurations, server hostnames, or other users' request history.
-- **Sign in with Plex:** One-click Plex OAuth authentication that auto-provisions user profiles.
+- **Sign in with Plex:** One-click Plex OAuth authentication that auto-provisions user profiles. Works from phones and the installed Home Screen app as well as desktop.
+- **Sign in with Face ID / Touch ID / Windows Hello:** after signing in once, add a passkey from the profile menu and use your device's unlock from then on. Requires the site to be served over https.
+- **Profile rules:** admins see every profile and can browse as any of them; standard users only ever see and use their own. The list of accounts is not shown to anyone who is signed out.
 
 ### 📥 6. Request Management & Approvals Workflow
 - **Automated Routing:** Automatically checks Plex library availability; if missing, routes requests directly to Radarr (Movies) or Sonarr (TV).
@@ -52,10 +79,16 @@ A modern, self-hosted discovery hub and request manager for **Plex** & **Jellyfi
 
 ### 🔔 9. Automated Notifications (Telegram & Discord) & Hardware Telemetry
 - **Instant Alerts:** Dispatches rich notification cards to **Telegram** and **Discord** for request events (Pending, Approved, Declined, Available).
+- **Push notifications to your phone:** turn them on from the profile menu. Admins are told about new requests; requesters are told when theirs is approved, declined or available. No third-party service or account is needed. On iPhone this requires the app to be installed to the Home Screen (iOS 16.4 or later).
 - **Host Telemetry & Monitoring:** Live CPU utilization, thermal sensor monitoring, RAM telemetry, and sustained temperature threshold alerts.
 
 ### 🎬 10. Movie Collections & Franchise Browser
 - **Franchise Sagas:** Interactive collection browsing with complete franchise completion tracking and batch requesting.
+
+### 🗓️ 11. Coming Soon by Streaming Service
+- **"Coming to…" rows:** upcoming series and films for each streaming service available in your region, built from the service's own networks and studios — new series first, then returning series with new episodes on the way.
+- **Status at a glance:** posters and the slideshow show *Requested* or *In Library* straight away, without opening the title.
+- **Widescreen slideshow on desktop:** artwork is shown whole at its own shape with soft faded edges, rather than cropped to fill the window.
 
 ---
 
@@ -166,13 +199,16 @@ unbounded file and records request bodies in plaintext.
 ```bash
 npm test                          # offline, dependency-free unit suite
 node test/sandbox/server.mjs 5099 # UI sandbox at http://127.0.0.1:5099
+node test/sandbox/server.mjs 5099 --real-art   # same, with real TMDB artwork (for screenshots)
 ```
 
 The **sandbox** serves the real `public/` directory against a fixture API so front-end changes
 can be exercised in a browser without touching a live install. It deliberately does *not* boot
 `server/index.js` — that starts hardware monitoring and can dispatch real Telegram/Discord
 alerts. It reads no config, opens no connection to Plex/Radarr/Sonarr, and generates its
-posters locally, so it needs no network and no API keys.
+posters locally, so it needs no network and no API keys. The one exception is the optional
+`--real-art` flag, which reads your TMDB key from the local config to load real titles and
+artwork; everything else stays stubbed.
 
 Fixtures are shaped to surface the bugs that are hard to eyeball: several hundred cards,
 deliberate same-title collisions (Dune 1984/2021, IT 1990/2017) carrying different ratings, and
