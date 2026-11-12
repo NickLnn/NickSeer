@@ -1,5 +1,6 @@
 import { load } from '../config.js';
 import arr from './arr.js';
+import push from './push.js';
 
 export const NotificationType = {
   SystemTemperatureAlert: 'systemTemp',
@@ -31,6 +32,13 @@ const TYPE_MAP = {
 
 export async function notify(type, reqData = {}) {
   const cfg = load();
+  // Web Push rides on the same events. It is fired from here because every
+  // request route already calls telegram.notify(), and it must go out whether
+  // or not Telegram itself is configured. Never awaited, never throws.
+  try {
+    const admins = (cfg.auth?.users || []).filter((u) => (u.role || 'user') === 'admin').map((u) => u.username);
+    push.notify(TYPE_MAP[type] || type, reqData, admins);
+  } catch { /* push is best-effort */ }
   const c = cfg.telegram;
   if (!c || !c.enabled || !c.botToken || !c.chatId) return;
 

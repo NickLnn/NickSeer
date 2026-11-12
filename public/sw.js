@@ -2,7 +2,7 @@
 // Implements instant offline launch, Stale-While-Revalidate caching,
 // and resilient shell fallback for home screen standalone apps.
 
-const CACHE_NAME = 'nickseer-pwa-v4.6';
+const CACHE_NAME = 'nickseer-pwa-v5.1';
 
 const PRECACHE_SHELL = [
   '/',
@@ -44,6 +44,9 @@ const PRECACHE_SHELL = [
   '/js/fixes.js',
   '/js/login-enhance.js',
   '/js/a2hs.js',
+  '/js/native.js',
+  '/js/push-client.js',
+  '/js/passkey-client.js',
   '/js/overlay.js',
   '/js/util.js'
 ];
@@ -79,6 +82,51 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// ---------------------------------------------------------------------------
+// Telling the open app that newer code exists
+// ---------------------------------------------------------------------------
+// Everything here is served stale-while-revalidate, so a launch always paints
+// the PREVIOUS version and only fetches the new one in the background. Nothing
+// ever told the page, and the installed iOS app is resumed from memory rather
+// than reloaded — so a phone could sit on old code indefinitely (Nick's phone
+// was still on the morning's build at 16:22 on 2026-11-12).
+//
+// Now: whenever a background refresh brings back DIFFERENT code than the copy
+// just served (ETag changed), the page is told, and native.js reloads it at a
+// safe moment. After that reload the cache already holds the new copy, the
+// ETags match, and nothing further is sent — so it cannot loop.
+let notifyTimer = null;
+function notifyUpdate() {
+  clearTimeout(notifyTimer);
+  notifyTimer = setTimeout(async () => {
+    const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    all.forEach((c) => c.postMessage({ type: 'ns-update' }));
+  }, 400);
+}
+function codeChanged(oldRes, newRes) {
+  if (!oldRes || !newRes) return false;
+  const a = oldRes.headers.get('etag'), b = newRes.headers.get('etag');
+  return !!a && !!b && a !== b;
+}
+
+// The app asks on resume ("am I current?") because a resume is not a
+// navigation and would otherwise never trigger a refresh of the shell.
+self.addEventListener('message', (event) => {
+  if (!event.data || event.data.type !== 'ns-check') return;
+  event.waitUntil((async () => {
+    try {
+      const cache = await caches.open(CACHE_NAME);
+      const cached = await cache.match('/index.html');
+      const res = await fetch('/index.html', { cache: 'no-cache' });
+      if (res && res.status === 200) {
+        const changed = codeChanged(cached, res);
+        await cache.put('/index.html', res.clone());
+        if (changed) notifyUpdate();
+      }
+    } catch { /* offline — nothing to do */ }
+  })());
+});
+
 // Fetch: smart Stale-While-Revalidate & Network-First strategies
 self.addEventListener('fetch', (event) => {
   const req = event.request;
@@ -100,8 +148,12 @@ self.addEventListener('fetch', (event) => {
       const cached = await cache.match('/index.html');
 
       const network = fetch(req)
-        .then((res) => {
-          if (res && res.status === 200) cache.put('/index.html', res.clone());
+        .then(async (res) => {
+          if (res && res.status === 200) {
+            const changed = codeChanged(cached, res);
+            await cache.put('/index.html', res.clone());
+            if (changed) notifyUpdate();
+          }
           return res;
         })
         .catch(() => null);
@@ -136,7 +188,16 @@ self.addEventListener('fetch', (event) => {
           .then((networkResponse) => {
             if (networkResponse && networkResponse.status === 200) {
               const clone = networkResponse.clone();
-              caches.open(CACHE_NAME).then((cache) => cache.put(req, clone));
+              const isCode = url.origin === self.location.origin && /\.(css|js|mjs)$/i.test(url.pathname);
+              const changed = isCode && codeChanged(cachedResponse, networkResponse);
+              caches.open(CACHE_NAME).then(async (cache) => {
+                // Lookups ignore the ?v= stamp, and return the OLDEST entry for
+                // a path. Without this delete, /css/enhance.css?v=old stayed
+                // first in line and a new stamp never took effect.
+                if (isCode) await cache.delete(req, { ignoreSearch: true });
+                await cache.put(req, clone);
+                if (changed) notifyUpdate();
+              });
             }
             return networkResponse;
           })
@@ -156,4 +217,33 @@ self.addEventListener('fetch', (event) => {
   //    shared device profile A's rows were being served to profile B. The
   //    client already keeps a 5-minute in-memory cache in util.js that IS
   //    keyed on the auth token, which is the correct layer for this.
+});
+
+// ---------------------------------------------------------------------------
+// Web Push (server/services/push.js). The payload is JSON:
+//   { title, body, tag, url }
+// ---------------------------------------------------------------------------
+self.addEventListener('push', (event) => {
+  let d = {};
+  try { d = event.data ? event.data.json() : {}; } catch { d = { body: event.data ? event.data.text() : '' }; }
+  event.waitUntil(self.registration.showNotification(d.title || 'NickSeer', {
+    body: d.body || '',
+    tag: d.tag || undefined,          // same tag replaces the earlier notification
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
+    data: { url: d.url || '/' }
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || '/';
+  event.waitUntil((async () => {
+    const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const c of all) {
+      // Reuse the open app instead of stacking a second copy.
+      try { await c.focus(); if ('navigate' in c) await c.navigate(url); return; } catch { /* try the next one */ }
+    }
+    await self.clients.openWindow(url);
+  })());
 });

@@ -55,7 +55,17 @@ async function posterFor(title, year, media) {
 }
 function tuning() { const t = load().aiTuning || {}; return { minRating: Number.isFinite(t.minRating) ? t.minRating : 6.2, minVotes: Number.isFinite(t.minVotes) ? t.minVotes : 80, maxCandidates: Number.isFinite(t.maxCandidates) ? t.maxCandidates : 50, historyDays: Number.isFinite(t.historyDays) ? t.historyDays : 60, englishOnly: t.englishOnly === undefined ? false : !!t.englishOnly }; }
 
-router.get('/home', async (req, res) => { try { const userId = req.user?.username || req.user?.plexId || req.query.userId; res.json(await engine.recommend({ userId, force: isForce(req) })); } catch (e) { res.status(200).json({ error: e.message, rows: [] }); } });
+// Whose history/taste a personalised route should use. A signed-in user is
+// always themselves; only an admin may pass ?userId= to browse as someone else
+// (the "Who's watching?" picker). Returns '' when nobody is signed in.
+function viewAs(req) {
+  const self = req.user?.username || req.user?.plexId || '';
+  const asked = String(req.query?.userId || '').trim();
+  if (asked && req.user?.role === 'admin') return asked;
+  return self;
+}
+
+router.get('/home', async (req, res) => { try { const userId = viewAs(req) || req.query.userId; res.json(await engine.recommend({ userId, force: isForce(req) })); } catch (e) { res.status(200).json({ error: e.message, rows: [] }); } });
 
 router.get('/rows', async (req, res) => {
   const media = req.query.media === 'tv' ? 'tv' : 'movie';
@@ -222,7 +232,7 @@ async function resolveSeed(key, type) { try { const media = type === 'show' ? 't
 router.get('/ai-suggest', async (req, res) => {
   const cfg = load(); const aiOn = cfg.ai?.provider && cfg.ai.provider !== 'none'; const T = tuning();
   try {
-    const activeUser = req.user?.username || req.user?.plexId || req.query.userId || 'all';
+    const activeUser = viewAs(req) || req.query.userId || 'all';
     const key = `ai-suggest:v4:${activeUser}:${cfg.ai?.provider || 'none'}:${T.minRating}:${T.minVotes}:${T.maxCandidates}:${T.historyDays}:${T.englishOnly ? 'en' : 'multi'}`;
     // Two-phase: the rule-based list is returned as soon as the TMDB fan-out is
     // done; the LLM rerank runs in the background and the client polls for it.
@@ -419,7 +429,7 @@ function detectStreamingService(d, media, region = 'US') {
 
 router.get('/collections', async (req, res) => {
   try {
-    const userId = req.user?.username || req.user?.plexId || req.query.userId || '';
+    const userId = viewAs(req) || req.query.userId || '';
     const data = await collections.getCollections({ userId, force: req.query.refresh === '1' });
     res.json(data);
   } catch (e) {

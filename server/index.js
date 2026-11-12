@@ -77,6 +77,8 @@ const healthRouter = await tryRouter('./routes/health.js');
 const requestsRouter = await tryRouter('./routes/requests.js');
 const overseerrRouter = await tryRouter('./routes/overseerr.js');
 const webhookRouter = await tryRouter('./routes/webhook.js');
+const pushRouter = await tryRouter('./routes/push.js');
+const passkeyRouter = await tryRouter('./routes/passkey.js');
 
 // Hardened Auth Guard
 app.use((req, res, next) => {
@@ -108,7 +110,7 @@ app.use((req, res, next) => {
 
   if (!c.auth?.enabled) return next();
   if (p === '/api/health') return next();
-  if (p.startsWith('/api/auth/login') || p.startsWith('/api/auth/status') || p.startsWith('/api/auth/profiles') || p.startsWith('/api/auth/plex')) return next();
+  if (p.startsWith('/api/auth/login') || p.startsWith('/api/auth/status') || p.startsWith('/api/auth/profiles') || p.startsWith('/api/auth/plex') || p.startsWith('/api/auth/passkey/login')) return next();
   if (p.startsWith('/api/public')) return next();
 
   const tok = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
@@ -127,6 +129,7 @@ app.use((req, res, next) => {
   next();
 });
 
+if (passkeyRouter) app.use('/api/auth/passkey', passkeyRouter);
 if (authRouter) app.use('/api/auth', authRouter);
 if (authRolesRouter) app.use('/api/auth', authRolesRouter);
 if (publicRouter) app.use('/api/public', publicRouter);
@@ -136,6 +139,7 @@ if (statusRouter) app.use('/api/status', statusRouter);
 if (requestRouter) app.use('/api/request', requestRouter);
 if (healthRouter) app.use('/api/health-detail', healthRouter);
 if (requestsRouter) app.use('/api/requests', requestsRouter);
+if (pushRouter) app.use('/api/push', pushRouter);
 if (webhookRouter) app.use('/api/v1/webhook', webhookRouter);
 if (overseerrRouter) app.use('/api/v1', overseerrRouter);
 

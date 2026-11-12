@@ -58,19 +58,12 @@ function recordSuccessfulLogin(ip) {
 }
 
 
-// Unauthenticated (the login screen needs it to draw the profile picker).
-// `role` is deliberately NOT returned: publishing which account is the admin
-// hands an attacker the exact username to brute-force.
+// Scoped to the caller: an admin gets every account, a normal user only their
+// own, a signed-out visitor nothing. The path stays on the auth-bypass list in
+// index.js, so the token is verified here.
 router.get('/profiles', (req, res) => {
-  const c = load();
-  const users = (c.auth?.users || []).map(u => ({
-    id: u.username,
-    name: u.username,
-    thumb: u.thumb || '',
-    isAccount: true,
-    plex: !!u.plexToken
-  }));
-  res.json({ ok: true, profiles: users });
+  const tok = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
+  res.json({ ok: true, profiles: auth.visibleProfiles(tok ? auth.verifyToken(tok) : null) });
 });
 
 router.get('/status', (req, res) => {
@@ -107,14 +100,29 @@ router.get('/me', (req, res) => {
 router.post('/plex/pin', async (req, res) => {
   try {
     const pin = await plexauth.createPin();
-    const forwardUrl = (req.body && req.body.forwardUrl) || '';
-    res.json({ ok: true, id: pin.id, code: pin.code, authUrl: plexauth.authUrl(pin.code, forwardUrl) });
+    const state = auth.plexPinState(pin.id);
+    // Plex sends the browser back to forwardUrl after approval. Carry the PIN
+    // on it so WHICHEVER page lands there can finish the sign-in itself — on a
+    // phone that is not the page that started it (see login-enhance.js).
+    let forwardUrl = '';
+    try {
+      const f = new URL(String((req.body && req.body.forwardUrl) || ''));
+      if (f.protocol === 'http:' || f.protocol === 'https:') {
+        f.searchParams.set('plexpin', String(pin.id));
+        f.searchParams.set('plexstate', state);
+        forwardUrl = f.toString();
+      }
+    } catch { /* no/invalid forwardUrl — Plex just shows its own "done" page */ }
+    res.json({ ok: true, id: pin.id, code: pin.code, state, authUrl: plexauth.authUrl(pin.code, forwardUrl) });
   } catch (e) { res.status(200).json({ ok: false, error: e.message }); }
 });
 
 // Poll: once claimed, resolve the account and provision/sign-in a NickSeer user.
 router.get('/plex/check/:id', async (req, res) => {
   try {
+    if (!auth.plexPinStateOk(req.params.id, String(req.query.state || ''))) {
+      return res.status(403).json({ ok: false, error: 'Sign-in link is not valid — start again.' });
+    }
     const token = await plexauth.checkPin(req.params.id);
     if (!token) return res.json({ ok: true, pending: true });
     const account = await plexauth.accountFor(token);

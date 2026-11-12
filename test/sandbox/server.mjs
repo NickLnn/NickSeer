@@ -21,6 +21,7 @@
 //     the sandbox works with no outbound network at all.
 
 import http from 'http';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -370,7 +371,68 @@ function escapeXml(s) {
 // ---------------------------------------------------------------------------
 // Stubbed API
 // ---------------------------------------------------------------------------
-function api(pathname, url, body) {
+// ---------------------------------------------------------------------------
+// Optional auth simulation (off by default, so every older test is unchanged).
+//   GET /api/sandbox/auth?mode=on&plexAs=maria   turn login on; the fake Plex
+//                                                approves as that account
+//   GET /api/sandbox/auth?mode=off
+// The fake Plex "authUrl" is just forwardUrl, i.e. it bounces straight back to
+// the app exactly as app.plex.tv does after approval — which is the half of
+// the phone flow the real sign-in loop lived in. Tokens are `sb:<username>`.
+// ---------------------------------------------------------------------------
+const SB_USERS = [
+  { username: 'nick', role: 'admin', plex: true },
+  { username: 'maria', role: 'user', plex: true },
+  { username: 'kostas', role: 'user', plex: false }
+];
+const sbAuth = { on: false, plexAs: 'maria', pin: 4200, checks: 0 };
+function sbViewer(req) {
+  const m = /^Bearer\s+sb:(.+)$/i.exec(req?.headers?.authorization || '');
+  return m ? SB_USERS.find((u) => u.username === m[1]) || null : null;
+}
+const sbDeploy = { n: 0 };
+const sbSeen = { statusAuth: [] };
+function sbApi(pathname, url, body, req) {
+  if (pathname === '/api/sandbox/deploy') { sbDeploy.n++; return { deploy: sbDeploy.n }; }
+  if (pathname === '/api/sandbox/seen') return sbSeen;
+  if (pathname === '/api/discover/media-status') sbSeen.statusAuth.push(req?.headers?.authorization || '');
+  if (pathname === '/api/sandbox/auth') {
+    if (url.searchParams.has('mode')) sbAuth.on = url.searchParams.get('mode') === 'on';
+    if (url.searchParams.get('plexAs')) sbAuth.plexAs = url.searchParams.get('plexAs');
+    return { ...sbAuth };
+  }
+  if (!sbAuth.on) return undefined;
+  const me = sbViewer(req);
+  const pub = (u) => ({ username: u.username, name: u.username, role: u.role });
+  if (pathname === '/api/public/bootstrap') {
+    return { auth: { enabled: true, hasAdmin: true, plexLogin: true, approvals: false }, me: me ? { ok: true, user: pub(me) } : { ok: false }, health: { configured: true }, isAdmin: me?.role === 'admin' };
+  }
+  if (pathname === '/api/auth/status') return { enabled: true, hasAdmin: true, plexLogin: true, approvals: false };
+  if (pathname === '/api/auth/me') return me ? { ok: true, user: pub(me) } : { ok: false };
+  if (pathname === '/api/auth/profiles') {
+    const vis = !me ? [] : me.role === 'admin' ? SB_USERS : [me];
+    return { ok: true, profiles: vis.map((u) => ({ id: u.username, name: u.username, thumb: '', isAccount: true, plex: u.plex, role: u.role })) };
+  }
+  if (pathname === '/api/auth/plex/pin') {
+    const id = ++sbAuth.pin, state = 'st' + id;
+    const f = new URL(body?.forwardUrl || `http://127.0.0.1:${PORT}/`);
+    f.searchParams.set('plexpin', String(id)); f.searchParams.set('plexstate', state);
+    return { ok: true, id, code: 'sandbox', state, authUrl: f.toString() };
+  }
+  if (pathname.startsWith('/api/auth/plex/check/')) {
+    sbAuth.checks++;
+    const id = pathname.split('/').pop();
+    if (url.searchParams.get('state') !== 'st' + id) return { __status: 403, ok: false, error: 'Sign-in link is not valid — start again.' };
+    const u = SB_USERS.find((x) => x.username === sbAuth.plexAs) || SB_USERS[1];
+    return { ok: true, pending: false, token: 'sb:' + u.username, user: { username: u.username, role: u.role } };
+  }
+  if (pathname === '/api/settings/users' && me?.role !== 'admin') return { error: 'admin access required' };
+  return undefined;
+}
+
+function api(pathname, url, body, req) {
+  const sb = sbApi(pathname, url, body, req);
+  if (sb !== undefined) return sb;
   // Auth is reported as disabled so ensureAuth() short-circuits and the app
   // paints the real home view instead of the login overlay.
   if (pathname === '/api/public/bootstrap') {
@@ -574,11 +636,13 @@ const server = http.createServer((req, res) => {
     return req.on('end', () => {
       let body = null;
       try { body = raw ? JSON.parse(raw) : null; } catch { /* not json */ }
-      const payload = JSON.stringify(api(pathname, url, body));
+      const result = api(pathname, url, body, req);
+      const status = (result && result.__status) || 200;
+      const payload = JSON.stringify(result);
       const slow = /^\/api\/discover\/(movie|tv)\/\d+$/.test(pathname) ? DETAIL_DELAY_MS
         : (pathname === '/api/discover/home' || pathname === '/api/discover/rows') ? HOME_DELAY_MS : 0;
       if (slow) apiHits.detail++;
-      setTimeout(() => send(200, MIME['.json'], payload), slow);
+      setTimeout(() => send(status, MIME['.json'], payload), slow);
     });
   }
 
@@ -588,7 +652,19 @@ const server = http.createServer((req, res) => {
   if (!file.startsWith(PUBLIC)) return send(403, 'text/plain', 'forbidden');
   fs.readFile(file, (err, buf) => {
     if (err) return send(404, 'text/plain', 'not found');
-    send(200, MIME[path.extname(file).toLowerCase()] || 'application/octet-stream', buf);
+    // Strong ETag like the real server (mini.js), so the service worker's
+    // "newer code exists" check has something to compare.
+    //   GET /api/sandbox/deploy   simulates a deploy: app.js and index.html
+    //   get one extra comment line, i.e. new bytes and a new ETag, without
+    //   touching the files on disk.
+    const ext = path.extname(file).toLowerCase();
+    if (sbDeploy.n && (rel === 'js/app.js' || rel === 'index.html')) {
+      const mark = ext === '.html' ? `\n<!-- sandbox deploy ${sbDeploy.n} -->\n` : `\n// sandbox deploy ${sbDeploy.n}\n`;
+      buf = Buffer.concat([buf, Buffer.from(mark)]);
+    }
+    const etag = '"' + crypto.createHash('sha1').update(buf).digest('base64url') + '"';
+    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': 'no-cache', ETag: etag });
+    res.end(buf);
   });
 });
 

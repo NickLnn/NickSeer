@@ -131,12 +131,12 @@ function wireRowActions(list, reqs) {
   // Wire approve/decline
   list.querySelectorAll('[data-approve]').forEach((b) => b.addEventListener('click', async () => {
     b.disabled = true; b.textContent = 'Approving…';
-    const r = await api(`/api/requests/${b.dataset.approve}/approve`, { method: 'POST' });
+    const r = await api(`/api/requests/${b.dataset.approve}/approve`, { method: 'POST' }); document.dispatchEvent(new CustomEvent('requests:changed'));
     if (r.ok) { toast('Request approved & added to download queue', 'ok'); lastDataSig = ''; render(); }
     else { b.disabled = false; b.textContent = 'Approve'; toast(r.error || 'failed'); }
   }));
   list.querySelectorAll('[data-decline]').forEach((b) => b.addEventListener('click', async () => {
-    const r = await api(`/api/requests/${b.dataset.decline}/decline`, { method: 'POST' });
+    const r = await api(`/api/requests/${b.dataset.decline}/decline`, { method: 'POST' }); document.dispatchEvent(new CustomEvent('requests:changed'));
     if (r.ok) { toast('Request declined', 'ok'); lastDataSig = ''; render(); }
   }));
 

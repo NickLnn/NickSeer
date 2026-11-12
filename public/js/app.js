@@ -32,6 +32,23 @@ export function applyCardStatus(cardEl, statusInfo) {
   }
 }
 
+function statusHeaders() {
+  const t = authToken();
+  return { 'Content-Type': 'application/json', ...(t ? { Authorization: 'Bearer ' + t } : {}) };
+}
+// Library / request status for items that are not poster cards (the slideshow).
+// Resolves true when the cache gained at least one of them.
+async function loadStatuses(items) {
+  const need = (items || []).filter((it) => it && it.id && !window.mediaStatusCache[it.id]).map((it) => ({ id: it.id, media: it.media === 'show' ? 'tv' : (it.media || 'movie') }));
+  if (!need.length) return false;
+  try {
+    const data = await fetch('/api/discover/media-status', { method: 'POST', headers: statusHeaders(), body: JSON.stringify({ items: need }) }).then((r) => r.json());
+    if (!data || !data.statuses) return false;
+    Object.assign(window.mediaStatusCache, data.statuses);
+    return need.some((n) => data.statuses[n.id]);
+  } catch { return false; }
+}
+
 window.statusObserver = new IntersectionObserver((entries) => {
   let needsFetch = false;
   entries.forEach((entry) => {
@@ -62,7 +79,10 @@ window.statusObserver = new IntersectionObserver((entries) => {
       const payload = itemsWithCards.slice(0, 50).map(({ id, media }) => ({ id, media }));
       fetch('/api/discover/media-status', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        // The token was missing here: with login enabled the server answered
+        // 401, so no poster ever got its In Library / Requested badge until
+        // the title had been opened (which fills the cache through api()).
+        headers: statusHeaders(),
         body: JSON.stringify({ items: payload })
       })
       .then((r) => r.json())
@@ -211,7 +231,7 @@ function brandBadge(key) {
 }
 
 // ---------- login & auth gating ----------
-import { renderAegeanLogin, promptReauth, getMe } from './login-enhance.js';
+import { renderAegeanLogin, promptReauth, getMe, resumePlexSignIn } from './login-enhance.js';
 // Consolidated boot payload. Replaces the four SERIALIZED requests the app
 // used to make before it could paint anything:
 //   /api/auth/status -> /api/auth/me -> /api/health -> /api/auth/me (again,
@@ -291,11 +311,33 @@ function userQuery(extra = '') {
   if (extra) parts.push(extra.replace(/^[?&]/, ''));
   return parts.length ? '?' + parts.join('&') : '';
 }
+// A normal (non-admin) account is locked to its own profile: it never sees
+// the picker and cannot browse as anyone else. Returns that user, or null when
+// the picker is allowed (admin, or login switched off entirely).
+async function lockedProfileUser() {
+  const b = bootstrapData || await fetchBootstrap();
+  if (!b || !b.auth?.enabled || !b.me?.ok || !b.me.user) return null;
+  return b.me.user.role === 'admin' ? null : b.me.user;
+}
+function isOwnProfile(p, user) {
+  return !!p && String(p.name || '').toLowerCase() === String(user.username).toLowerCase();
+}
+
 async function chooseProfile(force = false) {
+  const locked = await lockedProfileUser();
+  if (locked) {
+    if (!isOwnProfile(getProfile(), locked)) setProfile({ id: locked.username, name: locked.username });
+    document.getElementById('profileOverlay')?.classList.add('hidden');
+    releaseScrollLock('profile');
+    if (force) toast(`Signed in as ${locked.username}`, 'ok');
+    else showView(getInitialView());
+    return;
+  }
   let list = [];
   try {
+    const t = authToken();
     const [pRes, tUsers] = await Promise.all([
-      fetch('/api/auth/profiles').then(async (r) => {
+      fetch('/api/auth/profiles', { headers: t ? { Authorization: 'Bearer ' + t } : {} }).then(async (r) => {
         const txt = await r.text();
         try { return JSON.parse(txt); } catch { return { profiles: [] }; }
       }).catch(() => ({ profiles: [] })),
@@ -400,6 +442,20 @@ async function chooseProfile(force = false) {
       return;
     }
 
+    // Admin: browse as any account without that account's password / Plex
+    // sign-in (Nick, 2026-11-12). The admin's own session is kept — Home is
+    // personalised for the chosen profile (the server honours ?userId= for
+    // admins only), while requests and approvals stay under the admin.
+    if (me && me.role === 'admin') {
+      setProfile({ id, name });
+      host.classList.add('hidden'); releaseScrollLock('profile'); rowsCache = null;
+      bootstrapData = null;
+      await updateRoleVisibility(true);
+      showView('home');
+      toast(`Browsing as ${name}`, 'ok');
+      return;
+    }
+
     const result = await promptReauth(name, { isPlex, thumb });
     if (result && result.ok) {
       setProfile({ id: result.user.username, name: result.user.username });
@@ -442,6 +498,12 @@ function injectStyles() {
 // ---------- boot ----------
 async function boot() {
   injectStyles();
+  // Coming back from Plex (or a sign-in another copy of the app started):
+  // collect the token BEFORE deciding whether to show the login screen.
+  let resumed = null;
+  try { resumed = await resumePlexSignIn(); } catch { /* fall through to normal boot */ }
+  if (resumed) bootstrapData = null;
+  if (resumed && !resumed.ok && resumed.error) toast(resumed.error, 'bad');
   const ok = await ensureAuth();
   if (!ok) return; // login shown; resolves then calls afterAuth
   await afterAuth();
@@ -460,6 +522,11 @@ async function afterAuth() {
   try {
     await updateRoleVisibility();
   } catch { /* ignore */ }
+
+  // A profile left over from another account on this device must not carry
+  // over to a normal user.
+  const locked = await lockedProfileUser();
+  if (locked && !isOwnProfile(getProfile(), locked)) setProfile({ id: locked.username, name: locked.username });
 
   if (!getProfile()) {
     await chooseProfile(false);
@@ -608,6 +675,23 @@ export async function updateRoleVisibility(force = false) {
 
   return isAdmin;
 }
+const viewScroll = new Map();
+// Views paint progressively (rows are staggered in), so the page may not be
+// tall enough yet when the render promise resolves. Keep trying for ~1.5s,
+// and give up the moment the user scrolls on their own.
+function restoreScroll(y, seq) {
+  if (!y) return;
+  const t0 = Date.now(); let last = -1;
+  const tick = () => {
+    if (seq !== currentViewSeq) return;
+    if (last >= 0 && Math.abs((window.scrollY || 0) - last) > 4) return;   // user took over
+    const max = document.documentElement.scrollHeight - window.innerHeight;
+    window.scrollTo(0, Math.min(y, Math.max(0, max)));
+    last = window.scrollY || 0;
+    if (last < y - 2 && Date.now() - t0 < 1500) setTimeout(tick, 80);
+  };
+  tick();
+}
 async function showView(view, force = false) {
   const seq = ++currentViewSeq;
   // Navigating away ALWAYS tears down whatever is covering the app. This is
@@ -624,7 +708,19 @@ async function showView(view, force = false) {
   }
   // A different tab starts at its top. Without this the new view inherited
   // the previous one's scroll offset. Refreshing the SAME view keeps its place.
-  if (view !== currentView) window.scrollTo(0, 0);
+  //
+  // Each tab also remembers where it was left (native tab-bar behaviour):
+  // the offset is saved on the way out and restored once the view has painted.
+  const changed = view !== currentView;
+  let restoreY = 0;
+  if (changed) {
+    viewScroll.set(currentView, window.scrollY || 0);
+    restoreY = force ? 0 : (viewScroll.get(view) || 0);
+    window.scrollTo(0, 0);
+    // Short cross-fade so a tab change is not a hard cut. Opacity only: a
+    // transform here would re-anchor every position:fixed child of #app.
+    app.classList.remove('view-enter'); void app.offsetWidth; app.classList.add('view-enter');
+  }
   currentView = view;
   stopSlideshow();
   let route = '';
@@ -673,6 +769,8 @@ async function showView(view, force = false) {
     app.innerHTML = '';
     app.appendChild(emptyState('Something went wrong', e.message));
   }
+
+  if (restoreY && seq === currentViewSeq) restoreScroll(restoreY, seq);
 
   // Announce the settled view. info.js and live.js used to render straight off
   // their own nav click, which fires BEFORE showView finishes its async admin
@@ -1204,15 +1302,31 @@ function heroSlideshow(items) {
   const heroSize = (() => {
     const dpr = Math.min(window.devicePixelRatio || 1, 3);
     const w = window.innerWidth || 1280;
-    const h = narrow ? Math.max(420, window.innerHeight * 0.56) : Math.max(440, window.innerHeight * 0.64);
-    const need = Math.max(w, h * 16 / 9) * dpr;
+    // Desktop no longer stretches the backdrop across the full width (which
+    // cropped a 16:9 picture to its top half on a wide window). The slide is a
+    // 16:9 box as tall as the hero, anchored right — see enhance.css — so the
+    // pixels needed follow the hero HEIGHT, mirroring that CSS clamp().
+    const h = narrow ? Math.max(420, window.innerHeight * 0.56) : Math.max(480, Math.min(window.innerHeight * 0.72, w * 0.46));
+    const need = (narrow ? Math.max(w, h * 16 / 9) : Math.min(w, h * 16 / 9)) * dpr;
     return need <= 800 ? 'w780' : need <= 1300 ? 'w1280' : 'original';
   })();
   // Full-size backdrops are ~8–30MB each once decoded, so only the visible
   // slide and the next one hold an image; the rest are filled just before
   // they're shown (and the one after that is warmed in the background).
   const slides = items.map((it, i) => el('div', { class: 'hero-slide' + (i === 0 ? ' on' : '') }));
-  const srcOf = (i) => (items[i] && items[i].backdrop ? tmdbSized(items[i].backdrop, heroSize) : null);
+  // Phones: the hero box is portrait (428x519 on Nick's iPhone = 1284x1557
+  // device px). A 16:9 backdrop `cover`-ed into it shows under half its width
+  // and even a 1920px original is enlarged ~1.4x — soft. The 2:3 poster
+  // (2000x3000 original) fills the same box by DOWNscaling instead. w780 would
+  // be enlarged 1.65x at 3x DPR, so above 2x the original is used.
+  const portrait = narrow && items.some((it) => it && it.poster);
+  if (portrait) node.classList.add('hero-portrait');
+  const posterSize = (window.devicePixelRatio || 1) * (window.innerWidth || 400) <= 800 ? 'w780' : 'original';
+  const srcOf = (i) => {
+    const it = items[i]; if (!it) return null;
+    if (portrait && it.poster) return tmdbSized(it.poster, posterSize);
+    return it.backdrop ? tmdbSized(it.backdrop, heroSize) : null;
+  };
   const loadSlide = (i) => { const sl = slides[i]; const src = srcOf(i); if (sl && src && !sl.dataset.src) { sl.dataset.src = src; sl.style.backgroundImage = `url(${src})`; } };
   const unloadFar = (cur) => slides.forEach((sl, i) => { const d = (i - cur + items.length) % items.length; if (d > 1 && d < items.length - 1 && sl.dataset.src) { sl.style.backgroundImage = ''; delete sl.dataset.src; } });
   slides.forEach((s) => node.appendChild(s));
@@ -1271,7 +1385,12 @@ function heroSlideshow(items) {
     const dx = t.clientX - sx, dy = t.clientY - sy; st = 0;
     if (Math.abs(dx) >= 45 && Math.abs(dx) > Math.abs(dy) * 1.4) (dx < 0 ? next : prev)();
   }, { passive: true });
-  paint(); restart(); return node;
+  paint(); restart();
+  // The slide's Request button used to show "+ Request" for a title that was
+  // already requested or in the library until its sheet had been opened. Ask
+  // for all slides up front and repaint the one on screen when it is known.
+  loadStatuses(items).then((got) => { if (got && node.isConnected) paint(); });
+  return node;
 }
 function stopSlideshow() { if (slideTimer) { clearInterval(slideTimer); slideTimer = null; } }
 // Row with optional streaming brand logo before the title.
@@ -1541,7 +1660,8 @@ export async function openDetail(item) {
     const actions = el('div', { class: 'modal-actions' }, [
       reqBtn,
     d.trailerKey ? el('a', { class: 'btn btn-ghost', 'data-nav': '', href: `https://www.youtube.com/watch?v=${d.trailerKey}`, target: '_blank' }, '▶  YouTube') : null,
-    d.imdbUrl ? el('a', { class: 'btn btn-imdb', 'data-nav': '', href: d.imdbUrl, target: '_blank', rel: 'noopener' }, 'IMDb ↗') : null
+    d.imdbUrl ? el('a', { class: 'btn btn-imdb', 'data-nav': '', href: d.imdbUrl, target: '_blank', rel: 'noopener' }, 'IMDb ↗') : null,
+    shareBtn({ title: d.title || item.title, year: d.year || item.year, url: d.imdbUrl || `https://www.themoviedb.org/${media === 'tv' ? 'tv' : 'movie'}/${item.id}` })
   ]);
   let colChip = null;
   if (d.collection) {
@@ -1557,6 +1677,19 @@ export async function openDetail(item) {
       el('span', { class: 'mcol-arrow' }, 'View Franchise →')
     ]);
   }
+
+// Native share sheet (iOS/Android); copies the link where there is none.
+function shareBtn({ title, year, url }) {
+  const canShare = typeof navigator.share === 'function';
+  if (!canShare && !navigator.clipboard) return null;
+  return el('button', { class: 'btn btn-ghost btn-share', 'data-nav': '', title: 'Share', 'aria-label': 'Share', onclick: async () => {
+    const text = year ? `${title} (${year})` : title;
+    try {
+      if (canShare) await navigator.share({ title: text, text, url });
+      else { await navigator.clipboard.writeText(url); toast('Link copied', 'ok'); }
+    } catch (e) { if (e && e.name !== 'AbortError') toast('Could not share', 'bad'); }
+  } }, canShare ? '↗  Share' : '⧉  Copy link');
+}
 
 function resolveCountries(countries) {
   if (!countries || !countries.length) {

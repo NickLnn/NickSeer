@@ -69,15 +69,8 @@ import auth from '../services/auth.js';
 
 // `role` is deliberately omitted — see the note on /api/auth/profiles.
 router.get('/profiles', (req, res) => {
-  const c = load();
-  const users = (c.auth?.users || []).map(u => ({
-    id: u.username,
-    name: u.username,
-    thumb: u.thumb || '',
-    isAccount: true,
-    plex: !!u.plexToken
-  }));
-  res.json({ ok: true, profiles: users });
+  const tok = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
+  res.json({ ok: true, profiles: auth.visibleProfiles(tok ? auth.verifyToken(tok) : null) });
 });
 
 // ---------------------------------------------------------------------------

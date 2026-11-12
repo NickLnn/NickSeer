@@ -178,4 +178,39 @@ export function upsertPlexUser(account) {
 
 export function findByPlexId(id) { return (load().auth?.users || []).find((u) => u.plexId === id); }
 
-export default { ensureSecret, hashPassword, verifyPassword, makeToken, verifyToken, listUsers, findUser, isEnabled, approvalsOn, hasAnyAdmin, createUser, setPassword, setRole, deleteUser, login, upsertPlexUser, findByPlexId };
+// Which accounts the "Who's watching?" picker may show to `viewer` (the result
+// of verifyToken, or null).
+//   login disabled -> everyone (there is no identity to scope by)
+//   admin          -> everyone, with roles
+//   normal user    -> only themselves
+//   signed out     -> nothing (the list used to be public, which handed any
+//                     visitor every username on the server)
+export function visibleProfiles(viewer) {
+  const users = load().auth?.users || [];
+  const shape = (u, withRole) => ({
+    id: u.username,
+    name: u.username,
+    thumb: u.thumb || '',
+    isAccount: true,
+    plex: !!u.plexToken,
+    ...(withRole ? { role: u.role || 'user' } : {})
+  });
+  if (!isEnabled()) return users.map((u) => shape(u, false));
+  if (!viewer) return [];
+  if (viewer.role === 'admin') return users.map((u) => shape(u, true));
+  const me = String(viewer.username).toLowerCase();
+  return users.filter((u) => u.username.toLowerCase() === me).map((u) => shape(u, true));
+}
+
+// Binds a Plex PIN id to this server. /plex/check/:id is unauthenticated and
+// PIN ids are small sequential integers, so without this anyone could poll
+// neighbouring ids and collect the session of whoever is signing in. The value
+// only ever reaches the browser that created the PIN.
+export function plexPinState(id) {
+  return crypto.createHmac('sha256', ensureSecret()).update('plexpin:' + String(id)).digest('base64url').slice(0, 32);
+}
+export function plexPinStateOk(id, state) {
+  return !!state && safeEqual(plexPinState(id), state);
+}
+
+export default { visibleProfiles, plexPinState, plexPinStateOk, ensureSecret, hashPassword, verifyPassword, makeToken, verifyToken, listUsers, findUser, isEnabled, approvalsOn, hasAnyAdmin, createUser, setPassword, setRole, deleteUser, login, upsertPlexUser, findByPlexId };
