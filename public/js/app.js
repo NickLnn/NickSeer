@@ -1495,16 +1495,50 @@ function card(item, rank) {
   c.appendChild(el('div', { class: 'card-info' }, [el('div', { class: 'card-name' }, item.title), el('div', { class: 'card-year' }, item.year || '')]));
   return c;
 }
-function personCard(m) {
-  const c = card(m);
-  if (m.owned) c.appendChild(el('div', { class: 'card-badge', style: 'left:8px;right:auto;top:8px;background:rgba(53,208,127,.92);color:#03150b' }, '✓ In library'));
-  else c.appendChild(el('button', { class: 'btn btn-accent', 'data-nav': '', title: 'Request', style: 'position:absolute;bottom:8px;right:8px;padding:6px 10px;font-size:13px;border-radius:8px;z-index:6', onclick: (e) => { e.stopPropagation(); openRequestModal(m); } }, '＋'));
-  if (m.job) c.appendChild(el('div', { class: 'why-chip', style: 'background:rgba(0,0,0,.72)', title: m.job }, m.job));
-  return c;
-}
 function downloadRow(name, percent, timeLeft) {
   return el('div', { class: 'dl-item' }, [el('div', { class: 'dl-row' }, [el('span', { class: 'dl-name' }, name || 'item'), el('span', { class: 'dl-meta' }, (percent != null ? percent + '%' : '') + (timeLeft ? ' · ' + timeLeft : ''))]), el('div', { class: 'bar' }, [el('i', { style: `width:${percent || 0}%` })])]);
 }
+// ---------- sheet history ----------
+// A title sheet and a person sheet share one modal, and opening one from the
+// other simply replaced it — so closing a film opened from an actor's
+// filmography dropped you back on the page behind, not on the actor
+// (Nick, 2026-11-13). The modal now remembers the chain:
+//   Back pill, system Back / Esc, drag-down  -> previous sheet, at the scroll
+//                                               position it was left at
+//   X or a tap outside                       -> close everything
+const modalTrail = [];            // sheets to return to, oldest first
+let modalNow = null;              // { kind: 'detail' | 'person', arg }
+let modalReturning = false;
+let modalRestoreY = 0;
+function modalEnter(kind, arg) {
+  const modal = document.getElementById('modal'); const cardEl = document.getElementById('modalCard');
+  const open = modal && !modal.classList.contains('hidden');
+  if (!open) { modalTrail.length = 0; modalNow = null; }
+  const same = modalNow && modalNow.kind === kind && modalNow.arg && arg && modalNow.arg.id === arg.id;
+  if (open && modalNow && !modalReturning && !same) {
+    modalTrail.push({ kind: modalNow.kind, arg: modalNow.arg, y: cardEl ? cardEl.scrollTop : 0 });
+    if (modalTrail.length > 12) modalTrail.shift();
+  }
+  if (!modalReturning) modalRestoreY = 0;
+  modalReturning = false;
+  modalNow = { kind, arg };
+}
+function modalBack() {
+  const prev = modalTrail.pop();
+  if (!prev) { closeModal(); return; }
+  modalReturning = true; modalRestoreY = prev.y || 0;
+  (prev.kind === 'person' ? openPerson : prev.kind === 'films' ? openFilmography : openDetail)(prev.arg);
+}
+// Called wherever a sheet (re)builds its chrome.
+function modalBackBtn(cardEl) {
+  if (!modalTrail.length || cardEl.querySelector('.modal-back')) return;
+  const prev = modalTrail[modalTrail.length - 1];
+  const name = prev && prev.arg ? (prev.arg.label || prev.arg.name || prev.arg.title || '') : '';
+  cardEl.appendChild(el('button', { class: 'modal-back', 'data-nav': '', 'aria-label': name ? `Back to ${name}` : 'Back', onclick: modalBack }, [el('span', { 'aria-hidden': 'true' }, '‹'), name ? ` ${name}` : ' Back']));
+}
+// Final scroll position once a sheet has its real content.
+function modalSettle(cardEl) { cardEl.scrollTop = modalRestoreY || 0; modalRestoreY = 0; }
+
 // ---------- detail modal (with ownership badges) ----------
 let detailSeq = 0;
 function detailPath(item) {
@@ -1528,6 +1562,7 @@ function sheetArt(o) {
 function renderDetailShell(cardEl, item, media) {
   cardEl.innerHTML = '';
   cardEl.appendChild(el('button', { class: 'modal-close', 'data-nav': '', onclick: closeModal }, '✕'));
+  modalBackBtn(cardEl);
   const hero = el('div', { class: 'modal-video modal-shell-hero' });
   const art = sheetArt(item);
   if (art) hero.style.backgroundImage = `url(${art})`;
@@ -1556,11 +1591,12 @@ window.railWithArrows = (scrollEl) => railWithArrows(scrollEl);
 export async function openDetail(item) {
   const modal = document.getElementById('modal');
   const cardEl = document.getElementById('modalCard');
+  modalEnter('detail', item);
   modal.classList.remove('hidden');
   applyScrollLock();
   // The CSS grab bar on mobile now actually does something.
   clearSheetDrag(cardEl);
-  enableSheetDrag(cardEl, closeModal);
+  enableSheetDrag(cardEl, modalBack);
   document.getElementById('modalBackdrop').onclick = closeModal;
   const media = item.media === 'show' ? 'tv' : item.media || 'movie';
   if (!item.id) { cardEl.innerHTML = `<div style="padding:40px">No TMDB match for "${escHTML(item.title)}".</div>`; return; }
@@ -1589,6 +1625,7 @@ export async function openDetail(item) {
   const media_label = media === 'tv' ? 'TV' : 'Movie';
   cardEl.innerHTML = '';
   cardEl.appendChild(el('button', { class: 'modal-close', 'data-nav': '', onclick: closeModal }, '✕'));
+  modalBackBtn(cardEl);
   if (d.trailerKey) {
     // The backdrop stays behind the player and the iframe fades in on load.
     // A cross-origin iframe paints opaque WHITE until its document arrives,
@@ -1872,30 +1909,256 @@ function renderMetadataBlock(d, media) {
   }
   const more = (d.recommendations && d.recommendations.length ? d.recommendations : d.similar) || [];
   if (more.length) { body.appendChild(el('div', { class: 'section-label' }, 'More like this')); const row = el('div', { class: 'cast-row' }); more.forEach((m) => row.appendChild(card(normalize(m, m.media)))); body.appendChild(railWithArrows(row)); }
-  cardEl.appendChild(body); cardEl.scrollTop = 0;
+  cardEl.appendChild(body); modalSettle(cardEl);
 }
-async function openPerson(person) {
+// ---------- person sheet ----------
+// Rebuilt 2026-11-13. Sections, in order: header (portrait, facts, stats),
+// biography (collapsed, "Read more"), In your library, Known for, Coming up,
+// Behind the camera / Also appears in, Filmography (filterable list).
+// The data shaping (what counts as "known for") is server-side, in
+// server/services/personview.js.
+const PS_DEPT = { Acting: 'Actor', Directing: 'Director', Writing: 'Writer', Production: 'Producer', Sound: 'Composer', Camera: 'Cinematographer', Editing: 'Editor', Creator: 'Creator' };
+function psDate(iso) {
+  if (!iso) return '';
+  try { return new Date(iso + 'T12:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }); } catch { return iso; }
+}
+// Poster tile for the rails: the standard card (so ratings and the In library /
+// Requested badge behave exactly as everywhere else) with the role underneath.
+function personCard(m) {
+  // The card reads this cache when it is built — one badge, in one place. The
+  // old version added a second "In library" badge of its own at top-left,
+  // which sat underneath the rating chip.
+  if (m.owned && !window.mediaStatusCache[m.id]) window.mediaStatusCache[m.id] = { status: 'in_library', label: 'In library' };
+  const c = card(m);
+  const st = window.mediaStatusCache[m.id];
+  if (!m.owned && !(st && (st.status === 'requested' || st.status === 'in_library'))) {
+    c.appendChild(el('button', { class: 'ps-add', 'data-nav': '', title: 'Request', 'aria-label': `Request ${m.title}`, onclick: (e) => { e.stopPropagation(); openRequestModal(m); } }, '＋'));
+  }
+  const sub = m.job || (m.character ? `as ${m.character}` : '') || (m.date ? '' : 'Announced');
+  const eps = m.media === 'tv' && m.episodes > 1 ? `${m.episodes} episodes` : '';
+  return el('div', { class: 'ps-item' }, [
+    c,
+    el('div', { class: 'ps-item-t' }, m.title + (m.year ? ` (${m.year})` : '')),
+    sub || eps ? el('div', { class: 'ps-item-s' }, [sub, eps].filter(Boolean).join(' · ')) : null
+  ]);
+}
+function psSection(title, count, node, hint) {
+  return el('section', { class: 'ps-sec' }, [
+    el('div', { class: 'ps-sec-h' }, [el('h3', {}, title), count != null ? el('span', { class: 'ps-sec-n' }, String(count)) : null, hint ? el('span', { class: 'ps-sec-hint' }, hint) : null]),
+    node
+  ]);
+}
+function psRail(items) {
+  const row = el('div', { class: 'cast-row ps-rail' });
+  items.forEach((m) => row.appendChild(personCard(m)));
+  return railWithArrows(row);
+}
+// Poster tile used by the filmography window and its preview on the person sheet.
+function filmCard(f) {
+  if (f.owned && !window.mediaStatusCache[f.id]) window.mediaStatusCache[f.id] = { status: 'in_library', label: 'In library' };
+  const c = card(f);
+  if (!f.owned) c.appendChild(el('button', { class: 'ps-add', 'data-nav': '', title: 'Request', 'aria-label': `Request ${f.title}`, onclick: (e) => { e.stopPropagation(); openRequestModal(f); } }, '＋'));
+  const eps = f.media === 'tv' && f.episodes > 1 ? `${f.episodes} episodes` : '';
+  return el('div', { class: 'ps-item pf-item' }, [
+    c,
+    el('div', { class: 'ps-item-t' }, f.title),
+    el('div', { class: 'ps-item-s' }, [f.year || 'TBA', f.role, eps].filter(Boolean).join(' · '))
+  ]);
+}
+// The score a title is sorted by: IMDb when it is known (that is the number on
+// the poster), TMDB's otherwise. null = unrated, always sorted last.
+function filmScore(f) {
+  const imdb = window.imdbRatingFor ? window.imdbRatingFor(f.id) : null;
+  if (imdb != null) return Number(imdb);
+  return f.rating ? Number(f.rating) : null;
+}
+const PF_SORTS = [
+  ['new', 'Newest'], ['old', 'Oldest'], ['top', 'Top rated'], ['low', 'Lowest rated'], ['az', 'A–Z']
+];
+function pfCompare(mode) {
+  const date = (f) => f.date || '';
+  const byScore = (dir) => (a, b) => {
+    const x = filmScore(a), y = filmScore(b);
+    if (x == null && y == null) return date(b).localeCompare(date(a));
+    if (x == null) return 1; if (y == null) return -1;
+    return dir * (y - x) || date(b).localeCompare(date(a));
+  };
+  if (mode === 'old') return (a, b) => (date(a) || '9999').localeCompare(date(b) || '9999');   // undated last
+  if (mode === 'top') return byScore(1);
+  if (mode === 'low') return byScore(-1);
+  if (mode === 'az') return (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
+  return (a, b) => (date(b) || '9999').localeCompare(date(a) || '9999');                        // newest, undated (announced) first
+}
+// ---------- filmography window ----------
+// Its own sheet (kind 'films' in the sheet history): every title as a poster,
+// filter by kind / in library, sort by year, rating or title.
+async function openFilmography(arg) {
   const modal = document.getElementById('modal'); const cardEl = document.getElementById('modalCard');
+  modalEnter('films', arg);
   modal.classList.remove('hidden');
   applyScrollLock();
   clearSheetDrag(cardEl);
-  enableSheetDrag(cardEl, closeModal);
-  cardEl.innerHTML = '<div style="padding:60px;text-align:center;color:var(--muted)">Loading…</div>';
+  enableSheetDrag(cardEl, modalBack);
   document.getElementById('modalBackdrop').onclick = closeModal;
-  const p = await api('/api/discover/person/' + person.id);
-  if (p.error) { cardEl.innerHTML = `<div style="padding:40px">${p.error}</div>`; return; }
+  ++detailSeq;                                       // cancels a title/person load still in flight
+  const list = arg.filmography || [];
+  // The view survives going into a title and coming back.
+  const state = arg.state || (arg.state = { filter: 'all', sort: 'new' });
+
   cardEl.innerHTML = '';
   cardEl.appendChild(el('button', { class: 'modal-close', 'data-nav': '', onclick: closeModal }, '✕'));
-  cardEl.appendChild(el('div', { class: 'modal-body', style: 'padding-bottom:6px' }, [el('div', { style: 'display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap' }, [p.photo ? el('img', { src: p.photo, alt: p.name, style: 'width:120px;height:120px;border-radius:16px;object-fit:cover;background:#262633' }) : el('div', { class: 'cast-ph', style: 'width:120px;height:120px;border-radius:16px;font-size:40px' }, '👤'), el('div', { style: 'flex:1;min-width:240px' }, [el('h2', { class: 'modal-title', style: 'font-size:30px' }, p.name), p.department ? el('div', { class: 'modal-tagline' }, p.department + (p.place ? ` · ${p.place}` : '')) : null, el('div', { class: 'modal-meta' }, [el('span', { class: 'chip' }, `${p.counts.library} in your library`), el('span', { class: 'chip' }, `${p.counts.total} credits`), p.imdbUrl ? el('a', { class: 'btn btn-imdb', 'data-nav': '', href: p.imdbUrl, target: '_blank', rel: 'noopener', style: 'padding:6px 12px' }, 'IMDb ↗') : null]), p.biography ? el('p', { class: 'modal-overview', style: 'margin-top:10px' }, p.biography) : null])])]));
-  const body = el('div', { class: 'modal-body', style: 'padding-top:0' });
-  body.appendChild(el('div', { class: 'section-label' }, `In your library · ${p.name.split(' ')[0]}`));
-  if (p.inLibrary && p.inLibrary.length) { const row = el('div', { class: 'cast-row' }); p.inLibrary.forEach((m) => row.appendChild(personCard(m))); body.appendChild(railWithArrows(row)); }
-  else body.appendChild(el('div', { class: 'row-sub', style: 'margin-bottom:6px' }, 'Nothing yet — request something from "Known for" below.'));
-  if (p.knownFor && p.knownFor.length) { body.appendChild(el('div', { class: 'section-label' }, 'Known for (acting) · tap ＋ to send to your systems')); const row = el('div', { class: 'cast-row' }); p.knownFor.forEach((m) => row.appendChild(personCard(m))); body.appendChild(railWithArrows(row)); }
-  if (p.crewKnownFor && p.crewKnownFor.length) { body.appendChild(el('div', { class: 'section-label' }, 'Directed · written · produced · tap ＋ to request')); const row = el('div', { class: 'cast-row' }); p.crewKnownFor.forEach((m) => row.appendChild(personCard(m))); body.appendChild(railWithArrows(row)); }
-  cardEl.appendChild(body); cardEl.scrollTop = 0;
+  modalBackBtn(cardEl);
+
+  const grid = el('div', { class: 'pf-grid' });
+  const cells = new Map(list.map((f) => [f, filmCard(f)]));
+  const count = el('span', { class: 'pf-count' });
+  const note = el('span', { class: 'pf-note' });
+  const empty = el('div', { class: 'ps-empty hidden' }, 'Nothing in this list.');
+  const chip = (group, key, label, n) => el('button', { class: 'ps-chip', 'data-nav': '', 'data-g': group, 'data-k': key, onclick: () => { state[group] = key; paint(); } }, n != null ? [label, el('span', {}, String(n))] : label);
+  const filters = el('div', { class: 'ps-chips' });
+  [['all', 'All', list.length], ['movie', 'Films', list.filter((f) => f.media === 'movie').length], ['tv', 'Series', list.filter((f) => f.media === 'tv').length], ['owned', 'In library', list.filter((f) => f.owned).length]]
+    .forEach(([k, label, n]) => { if (k === 'all' || n) filters.appendChild(chip('filter', k, label, n)); });
+  const sorts = el('div', { class: 'ps-chips pf-sorts' }, [el('span', { class: 'pf-sort-l' }, 'Sort')]);
+  PF_SORTS.forEach(([k, label]) => sorts.appendChild(chip('sort', k, label)));
+
+  let ratingsReady = false;
+  function paint() {
+    const keep = (f) => state.filter === 'all' || (state.filter === 'owned' ? f.owned : f.media === state.filter);
+    const shown = list.filter(keep).sort(pfCompare(state.sort));
+    // Re-order the existing tiles rather than rebuilding them, so posters that
+    // have already loaded are not fetched or faded in again.
+    const frag = document.createDocumentFragment();
+    shown.forEach((f) => frag.appendChild(cells.get(f)));
+    grid.replaceChildren(frag);
+    empty.classList.toggle('hidden', shown.length > 0);
+    count.textContent = shown.length === list.length ? `${list.length} titles` : `${shown.length} of ${list.length}`;
+    const byRating = state.sort === 'top' || state.sort === 'low';
+    note.textContent = byRating && !ratingsReady ? 'Loading IMDb ratings…' : '';
+    cardEl.querySelectorAll('.ps-chip').forEach((b) => { const on = state[b.dataset.g] === b.dataset.k; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); });
+  }
+
+  cardEl.appendChild(el('div', { class: 'ps pf' }, [
+    el('header', { class: 'pf-head' }, [
+      arg.photo ? el('img', { class: 'pf-photo', src: arg.photo, alt: '' }) : null,
+      el('div', { class: 'pf-id' }, [el('div', { class: 'ps-kick' }, 'Filmography'), el('h2', { class: 'pf-name' }, arg.name || ''), count])
+    ]),
+    el('div', { class: 'pf-bar' }, [filters, sorts, note]),
+    el('div', { class: 'ps-body pf-body' }, [grid, empty])
+  ]));
+  paint();
+  modalSettle(cardEl);
+
+  // Ratings for every released title, asked for up front in the background —
+  // not as each poster scrolls into view — so they are there when you get to
+  // them and a rating sort has the real IMDb numbers to work with.
+  const today = new Date().toISOString().slice(0, 10);
+  const rated = list.filter((f) => f.date && f.date <= today);
+  if (window.imdbPrefetch && rated.length) {
+    const mine = detailSeq;
+    await Promise.race([window.imdbPrefetch(rated), new Promise((r) => setTimeout(r, 12000))]);
+    ratingsReady = true;
+    if (mine !== detailSeq || !cardEl.contains(grid)) return;       // the sheet has moved on
+    // Only re-order under the reader if they asked for a rating order.
+    if (state.sort === 'top' || state.sort === 'low') paint(); else note.textContent = '';
+  } else ratingsReady = true;
+}
+async function openPerson(person) {
+  const modal = document.getElementById('modal'); const cardEl = document.getElementById('modalCard');
+  modalEnter('person', person);
+  modal.classList.remove('hidden');
+  applyScrollLock();
+  clearSheetDrag(cardEl);
+  enableSheetDrag(cardEl, modalBack);
+  document.getElementById('modalBackdrop').onclick = closeModal;
+  // Shell first: the name (and photo, when the tile had one) are already known,
+  // so the sheet opens at its final shape instead of a bare "Loading…".
+  cardEl.innerHTML = '';
+  cardEl.appendChild(el('button', { class: 'modal-close', 'data-nav': '', onclick: closeModal }, '✕'));
+  modalBackBtn(cardEl);
+  cardEl.appendChild(el('div', { class: 'ps ps-loading' }, [
+    el('header', { class: 'ps-hero' }, [el('div', { class: 'ps-hero-in' }, [
+      el('div', { class: 'ps-photo ph' }, '👤'),
+      el('div', { class: 'ps-id' }, [el('h2', { class: 'ps-name' }, person.name || ' '), el('div', { class: 'shell-bar', style: 'width:52%;height:14px;margin-top:10px' }), el('div', { class: 'shell-bar', style: 'width:70%;height:34px;margin-top:16px' })])
+    ])]),
+    el('div', { class: 'ps-body' }, [el('div', { class: 'shell-bar', style: 'width:100%;height:64px' }), el('div', { class: 'shell-bar', style: 'width:34%;height:16px;margin-top:26px' }), el('div', { class: 'shell-bar', style: 'width:100%;height:210px;margin-top:12px' })])
+  ]));
+  const seq = ++detailSeq;
+  const p = await api('/api/discover/person/' + person.id);
+  if (seq !== detailSeq) return;                      // another sheet was opened meanwhile
+  if (!p || p.error) { cardEl.querySelector('.ps')?.remove(); cardEl.appendChild(el('div', { style: 'padding:48px 32px' }, (p && p.error) || 'Could not load this person.')); return; }
+
+  const counts = p.counts || {};
+  const first = (p.name || '').split(' ')[0];
+  const lead = p.primary === 'crew';
+  const facts = [];
+  if (p.birthday) facts.push(p.deathday ? `${psDate(p.birthday)} – ${psDate(p.deathday)}${p.age != null ? ` (aged ${p.age})` : ''}` : `Born ${psDate(p.birthday)}${p.age != null ? ` · age ${p.age}` : ''}`);
+  if (p.place) facts.push(p.place);
+
+  const stat = (n, label, hl) => el('div', { class: 'ps-stat' + (hl ? ' hl' : '') }, [el('b', {}, String(n)), el('span', {}, label)]);
+  const stats = el('div', { class: 'ps-stats' }, [
+    stat(counts.library || 0, 'In your library', (counts.library || 0) > 0),
+    counts.movies ? stat(counts.movies, counts.movies === 1 ? 'Film' : 'Films') : null,
+    counts.series ? stat(counts.series, 'Series') : null,
+    (p.upcoming || []).length ? stat(p.upcoming.length, 'Coming up') : null,
+    p.imdbUrl ? el('a', { class: 'btn btn-imdb ps-imdb', 'data-nav': '', href: p.imdbUrl, target: '_blank', rel: 'noopener' }, 'IMDb ↗') : null
+  ]);
+
+  const hero = el('header', { class: 'ps-hero' }, [
+    p.backdrop ? el('div', { class: 'ps-hero-bg', style: `background-image:url(${tmdbSized(p.backdrop, 'w780')})` }) : null,
+    el('div', { class: 'ps-hero-in' }, [
+      p.photo ? el('img', { class: 'ps-photo', src: p.photo, alt: p.name, decoding: 'async' }) : el('div', { class: 'ps-photo ph' }, '👤'),
+      el('div', { class: 'ps-id' }, [
+        p.department ? el('div', { class: 'ps-kick' }, PS_DEPT[p.department] || p.department) : null,
+        el('h2', { class: 'ps-name' }, p.name),
+        facts.length ? el('div', { class: 'ps-facts' }, facts.map((f) => el('span', {}, f))) : null,
+        stats
+      ])
+    ])
+  ]);
+
+  const body = el('div', { class: 'ps-body' });
+  if (p.biography) {
+    const long = p.biography.length > 340;
+    const bio = el('p', { class: 'ps-bio' + (long ? ' clamp' : '') }, p.biography);
+    body.appendChild(bio);
+    if (long) {
+      const more = el('button', { class: 'ps-more', 'data-nav': '', 'aria-expanded': 'false', onclick: () => { const open = bio.classList.toggle('clamp') === false; more.textContent = open ? 'Show less' : 'Read more'; more.setAttribute('aria-expanded', open ? 'true' : 'false'); } }, 'Read more');
+      body.appendChild(more);
+    }
+  }
+
+  const lib = p.inLibrary || [];
+  body.appendChild(lib.length
+    ? psSection('In your library', lib.length, psRail(lib))
+    : psSection('In your library', 0, el('div', { class: 'ps-empty' }, `Nothing with ${first} yet — tap ＋ on any title below to request it.`)));
+
+  const acting = p.knownFor || [], crew = p.crewKnownFor || [];
+  // A director leads with what they made; their few on-screen credits follow.
+  const main = lead ? crew : acting;
+  const other = lead ? acting : crew;
+  if (main.length) body.appendChild(psSection('Known for', null, psRail(main), 'tap ＋ to request'));
+  if ((p.upcoming || []).length) body.appendChild(psSection('Coming up', p.upcoming.length, psRail(p.upcoming)));
+  if (other.length >= (lead ? 3 : 1)) body.appendChild(psSection(lead ? 'Also appears in' : 'Behind the camera', null, psRail(other)));
+  // Filmography: the latest few here, everything in its own window.
+  const films = p.filmography || [];
+  if (films.length) {
+    const arg = { id: p.id, name: p.name, photo: p.photo, filmography: films, label: 'Filmography' };
+    const open = () => openFilmography(arg);
+    const row = el('div', { class: 'cast-row ps-rail' });
+    films.slice(0, 12).forEach((f) => row.appendChild(filmCard(f)));
+    if (films.length > 12) row.appendChild(el('button', { class: 'pf-more-tile', 'data-nav': '', onclick: open }, [el('b', {}, `+${films.length - 12}`), el('span', {}, 'See all')]));
+    body.appendChild(el('section', { class: 'ps-sec' }, [
+      el('div', { class: 'ps-sec-h' }, [el('h3', {}, 'Filmography'), el('span', { class: 'ps-sec-n' }, String(films.length)), el('button', { class: 'pf-open', 'data-nav': '', onclick: open }, `See all ${films.length} ›`)]),
+      railWithArrows(row)
+    ]));
+  }
+
+  cardEl.querySelector('.ps')?.remove();
+  cardEl.appendChild(el('div', { class: 'ps' }, [hero, body]));
+  modalSettle(cardEl);
 }
 function closeModal() {
+  modalTrail.length = 0; modalNow = null; modalReturning = false; modalRestoreY = 0;
   const card = document.getElementById('modalCard');
   clearSheetDrag(card);
   card.innerHTML = '';
@@ -1906,7 +2169,7 @@ document.addEventListener('nav:back', () => {
   const rq = document.getElementById('requestModal');
   if (rq && !rq.classList.contains('hidden')) { closeRequestModal(); return; }
   const modal = document.getElementById('modal');
-  if (!modal.classList.contains('hidden')) closeModal();
+  if (!modal.classList.contains('hidden')) modalBack();
 });
 window.openRequestModal = openRequestModal;
 async function openRequestModal(item) {

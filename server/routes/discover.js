@@ -1,4 +1,5 @@
 import collections from '../services/collections.js';
+import { buildPersonView } from '../services/personview.js';
 // Discovery routes. KEY CHANGE: mini() now passes through `imdbRating` when an
 // item carries `_imdbRating` (from the IMDb chart scrape) — so those posters get
 // the IMDb badge instantly, no OMDb call. Also: /imdb-ratings batch, /brand-logos.
@@ -333,16 +334,8 @@ router.get('/anticipated', async (req, res) => { const media = req.query.media =
 router.get('/person/:id', async (req, res) => {
   try {
     const [p, owned] = await Promise.all([tmdb.person(req.params.id), ownedSet()]);
-    const seen = new Set(); const credits = [];
-    for (const c of (p.combined_credits?.cast || [])) { if (c.adult) continue; const media = c.media_type === 'tv' ? 'tv' : 'movie'; const key = media + ':' + c.id; if (seen.has(key)) continue; seen.add(key); credits.push({ id: c.id, media, title: c.title || c.name, year: (c.release_date || c.first_air_date || '').slice(0, 4), poster: tmdb.img(c.poster_path), backdrop: tmdb.img(c.backdrop_path, 'w1280'), rating: c.vote_average, popularity: c.popularity || 0, character: c.character || '', owned: owned.has(media + ':' + String(c.id)) }); }
-    const inLibrary = credits.filter((c) => c.owned).sort((a, b) => b.popularity - a.popularity);
-    const knownFor = credits.filter((c) => c.poster).sort((a, b) => b.popularity - a.popularity).slice(0, 24);
-    const KEEP = ['Director', 'Writer', 'Screenplay', 'Producer', 'Executive Producer', 'Creator', 'Story'];
-    const crewSeen = new Set(); const crew = [];
-    for (const c of (p.combined_credits?.crew || [])) { if (c.adult || !KEEP.includes(c.job)) continue; const media = c.media_type === 'tv' ? 'tv' : 'movie'; const key = media + ':' + c.id; if (crewSeen.has(key)) continue; crewSeen.add(key); crew.push({ id: c.id, media, title: c.title || c.name, year: (c.release_date || c.first_air_date || '').slice(0, 4), poster: tmdb.img(c.poster_path), backdrop: tmdb.img(c.backdrop_path, 'w1280'), rating: c.vote_average, popularity: c.popularity || 0, job: c.job, owned: owned.has(media + ':' + String(c.id)) }); }
-    const crewKnownFor = crew.filter((c) => c.poster).sort((a, b) => b.popularity - a.popularity).slice(0, 24);
-    const bio = p.biography ? (p.biography.length > 420 ? p.biography.slice(0, 417) + '…' : p.biography) : '';
-    res.json({ id: p.id, name: p.name, department: p.known_for_department, photo: tmdb.img(p.profile_path, 'w300'), biography: bio, birthday: p.birthday, place: p.place_of_birth, imdbId: p.external_ids?.imdb_id || null, imdbUrl: p.external_ids?.imdb_id ? `https://www.imdb.com/name/${p.external_ids.imdb_id}/` : null, counts: { library: inLibrary.length, total: credits.length, crew: crew.length }, inLibrary, knownFor, crewKnownFor });
+    // Ranking, filtering and grouping live in services/personview.js (pure, testable).
+    res.json(buildPersonView(p, { isOwned: (k) => owned.has(k), img: tmdb.img }));
   } catch (e) { res.status(200).json({ error: e.message }); }
 });
 

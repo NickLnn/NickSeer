@@ -76,6 +76,7 @@ A modern, self-hosted discovery hub and request manager for **Plex** & **Jellyfi
 ### 📊 8. Overseerr Movie & Series Metadata Hub
 - **Rich Technical & Financial Data:** Embedded metadata block directly in the details modal showcasing TMDB Status, Formatted Release Date (with ticket icon), Worldwide Revenue, Production Budget, Original Language, Production Country with flag emoji, and Studio name.
 - **Adaptive Layout:** Clean responsive design system integration matching the dark glassmorphic theme across desktop, tablet, and mobile.
+- **Cast & Crew Pages:** tap anyone in a title's cast to open their page — portrait, age and birthplace, a biography you can expand, what you already have of theirs, what they are *known for*, what is *coming up*, and their latest work. **See all** opens the full filmography in its own window: every title as a large poster with its IMDb rating, filterable by films, series or "in library", sortable by newest, oldest, top rated, lowest rated or A–Z, and requestable in one tap. Back always returns to where you came from — title, person or filmography — at the spot you left. "Known for" is ranked by real roles: talk-show and guest appearances are left out, and directors and writers lead with the work they made.
 
 ### 🔔 9. Automated Notifications (Telegram & Discord) & Hardware Telemetry
 - **Instant Alerts:** Dispatches rich notification cards to **Telegram** and **Discord** for request events (Pending, Approved, Declined, Available).

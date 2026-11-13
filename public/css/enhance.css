@@ -4008,3 +4008,173 @@ html:not([data-input="keys"]) .icon-btn:focus-visible {
   .card .card-status-badge { top: auto; bottom: 8px; right: 8px; left: auto; }
   .card.has-status .why-chip { top: 8px; }
 }
+
+/* ==========================================================================
+   Person sheet — rebuilt 2026-11-13 (app.js openPerson)
+   ========================================================================== */
+.ps { --ps-pad: 32px; }
+.ps-hero { position: relative; padding: 34px var(--ps-pad) 24px; overflow: hidden; border-radius: inherit; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+/* Best-known title, blurred, as a backdrop behind the header. */
+.ps-hero-bg { position: absolute; inset: -40px; background-size: cover; background-position: center 30%; filter: blur(28px) saturate(1.2); opacity: .42; transform: scale(1.1); }
+.ps-hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(18, 18, 26, .35) 0%, rgba(18, 18, 26, .82) 62%, var(--bg-2, #12121a) 100%); }
+.ps-hero-in { position: relative; z-index: 1; display: flex; gap: 28px; align-items: flex-end; }
+.ps-photo { width: 168px; aspect-ratio: 2 / 3; flex: 0 0 auto; object-fit: cover; border-radius: 18px; background: #22222e; box-shadow: 0 18px 44px rgba(0, 0, 0, .55); border: 1px solid rgba(255, 255, 255, .1); }
+.ps-photo.ph { display: grid; place-items: center; font-size: 54px; color: #6b7080; }
+.ps-id { flex: 1; min-width: 0; padding-bottom: 4px; }
+.ps-kick { display: inline-block; font-size: 11.5px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: #8fd0ff; background: rgba(58, 166, 224, .16); border: 1px solid rgba(58, 166, 224, .35); padding: 4px 10px; border-radius: 999px; margin-bottom: 10px; }
+.ps-name { margin: 0; font-size: clamp(28px, 4vw, 44px); font-weight: 900; letter-spacing: -.03em; line-height: 1.04; color: #fff; overflow-wrap: anywhere; }
+.ps-facts { display: flex; flex-wrap: wrap; gap: 4px 0; margin-top: 10px; color: #b8bcc8; font-size: 14px; }
+.ps-facts span + span::before { content: "·"; margin: 0 9px; color: #6b7080; }
+.ps-stats { display: flex; flex-wrap: wrap; align-items: stretch; gap: 10px; margin-top: 18px; }
+.ps-stat { min-width: 84px; padding: 9px 14px; border-radius: 14px; background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .08); }
+.ps-stat b { display: block; font-size: 20px; font-weight: 800; color: #fff; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.ps-stat span { display: block; margin-top: 2px; font-size: 10.5px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; color: #8a8f9c; white-space: nowrap; }
+.ps-stat.hl { background: rgba(53, 208, 127, .14); border-color: rgba(53, 208, 127, .38); }
+.ps-stat.hl b { color: #7ef0b0; }
+.ps-imdb { align-self: center; padding: 10px 14px !important; }
+
+.ps-body { padding: 6px var(--ps-pad) 30px; }
+.ps-bio { margin: 14px 0 0; color: #d6d6de; font-size: 15px; line-height: 1.65; max-width: 78ch; white-space: pre-line; }
+.ps-bio.clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
+.ps-more { margin-top: 6px; padding: 4px 0; background: none; border: 0; color: #6fc0f5; font-weight: 800; font-size: 13.5px; cursor: pointer; }
+.ps-more:hover { text-decoration: underline; }
+
+.ps-sec { margin-top: 28px; }
+.ps-sec-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+.ps-sec-h h3 { margin: 0; font-size: 19px; font-weight: 800; letter-spacing: -.01em; color: #fff; }
+.ps-sec-n { font-size: 12px; font-weight: 800; color: #cfd2da; background: rgba(255, 255, 255, .09); padding: 2px 8px; border-radius: 999px; font-variant-numeric: tabular-nums; }
+.ps-sec-hint { margin-left: auto; font-size: 12px; color: #7d8290; }
+.ps-empty { color: #9aa0ad; font-size: 14px; padding: 14px 16px; border-radius: 14px; background: rgba(255, 255, 255, .04); border: 1px dashed rgba(255, 255, 255, .12); }
+.ps-empty.hidden, .ps-row.hidden { display: none; }
+
+/* Rail tiles: the standard card, with title and role underneath. */
+.ps-rail { align-items: flex-start; }
+.ps-item { flex: 0 0 auto; width: 148px; }
+.ps-item > .card { width: 100%; }
+.ps-item-t { margin-top: 8px; font-size: 13px; font-weight: 700; color: #f0f0f5; line-height: 1.25; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.ps-item-s { margin-top: 2px; font-size: 12px; color: #9aa0ad; line-height: 1.3; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.ps-add { position: absolute; right: 8px; bottom: 8px; z-index: 6; width: 34px; height: 34px; border-radius: 50%; border: 0; cursor: pointer; background: #1E88C7; color: #fff; font-size: 17px; font-weight: 800; line-height: 1; box-shadow: 0 6px 16px rgba(0, 0, 0, .5); display: grid; place-items: center; transition: transform .12s ease, background .12s ease; }
+.ps-add:hover { background: #3AA6E0; transform: scale(1.08); }
+
+/* Filmography */
+.ps-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.ps-chip { display: inline-flex; align-items: center; gap: 7px; padding: 7px 13px; border-radius: 999px; cursor: pointer; background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .1); color: #cfd2da; font-weight: 700; font-size: 13px; }
+.ps-chip span { font-size: 11.5px; color: #8a8f9c; font-variant-numeric: tabular-nums; }
+.ps-chip.on { background: rgba(58, 166, 224, .18); border-color: rgba(58, 166, 224, .5); color: #fff; }
+.ps-chip.on span { color: #bfe3ff; }
+.ps-film-list { border-radius: 16px; background: rgba(255, 255, 255, .03); border: 1px solid rgba(255, 255, 255, .06); overflow: hidden; }
+.ps-row { display: grid; grid-template-columns: 46px 34px minmax(0, 1fr) auto auto; align-items: center; gap: 12px; padding: 8px 14px; cursor: pointer; border-top: 1px solid rgba(255, 255, 255, .05); outline: none; }
+.ps-row:first-child { border-top: 0; }
+.ps-row:hover, .ps-row:focus-visible, .ps-row.nav-focus { background: rgba(255, 255, 255, .06); }
+.ps-row-y { font-size: 13px; font-weight: 800; color: #cfd2da; font-variant-numeric: tabular-nums; }
+.ps-row-y.rep { color: transparent; }                 /* same year as the row above */
+.ps-row-p { width: 34px; height: 51px; border-radius: 6px; object-fit: cover; background: #22222e; }
+.ps-row-p.ph { display: grid; place-items: center; font-size: 15px; }
+.ps-row-t { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.ps-row-t b { font-size: 14px; font-weight: 700; color: #f0f0f5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ps-row-t i { font-style: normal; font-size: 12.5px; color: #9aa0ad; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ps-row-k { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #7d8290; }
+.ps-pill { font-size: 11.5px; font-weight: 800; padding: 5px 10px; border-radius: 999px; white-space: nowrap; border: 1px solid transparent; }
+.ps-pill.own { background: rgba(53, 208, 127, .16); color: #7ef0b0; border-color: rgba(53, 208, 127, .35); }
+.ps-pill.req { background: rgba(58, 166, 224, .16); color: #bfe3ff; border-color: rgba(58, 166, 224, .4); cursor: pointer; }
+.ps-pill.req:hover { background: rgba(58, 166, 224, .3); }
+
+@media (max-width: 768px) {
+  .ps { --ps-pad: 16px; }
+  .ps-hero { padding-top: 30px; }
+  /* Stats drop under the photo so they get the full width. */
+  .ps-hero-in { gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+  .ps-photo { width: 104px; border-radius: 14px; }
+  .ps-id { flex: 1 1 0; }
+  .ps-facts { font-size: 13px; }
+  .ps-stats { gap: 8px; margin-top: 14px; flex-basis: 100%; }
+  .ps-stat { min-width: 0; padding: 8px 11px; }
+  .ps-stat b { font-size: 17px; }
+  .ps-item { width: 124px; }
+  .ps-sec-h h3 { font-size: 17px; }
+  .ps-sec-hint { display: none; }
+  .ps-row { grid-template-columns: 40px 30px minmax(0, 1fr) auto; gap: 10px; padding: 8px 10px; }
+  .ps-row-p { width: 30px; height: 45px; }
+  .ps-row-k { display: none; }
+  .ps-pill { padding: 5px 8px; font-size: 11px; }
+}
+
+/* A title that is already in the library or requested needs no + button. The
+   status badge can arrive after the tile is built, so this is done in CSS. */
+.card.has-status > .ps-add { display: none; }
+
+/* Filmography: IMDb rating beside the title (app.js psFilmography). */
+.ps-row-tl { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ps-row-tl b { min-width: 0; }
+.ps-row-r { flex: 0 0 auto; display: inline-flex; }
+.ps-row-r:empty { display: none; }
+.ps-row-r .imdb-inline-badge { padding: 1px 6px 1px 4px; gap: 4px; font-size: 12px; border-radius: 6px; }
+.ps-row-r .imdb-inline-badge .imdb-svg { width: 22px; height: 11px; }
+.ps-row-r .imdb-inline-badge .imdb-badge-scale, .ps-row-r .imdb-inline-badge .imdb-badge-votes { display: none; }
+/* No score on IMDb: show nothing rather than a bare logo. */
+.ps-row-r .imdb-inline-badge:has(.imdb-badge-score:empty) { display: none !important; }
+
+/* Back pill on a sheet that was opened from another sheet (app.js modalTrail). */
+.modal-back {
+  position: absolute; top: 14px; left: 14px; z-index: 4;
+  max-width: min(60%, 320px); height: 40px; padding: 0 16px 0 12px;
+  display: inline-flex; align-items: center; gap: 4px;
+  border-radius: 999px; border: 1px solid rgba(255, 255, 255, .16);
+  background: rgba(10, 10, 15, .66); color: #fff; cursor: pointer;
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  font-size: 14px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.modal-back span { font-size: 20px; line-height: 1; margin-top: -2px; }
+.modal-back:hover { background: rgba(255, 255, 255, .18); }
+/* Keep the person header clear of the pill. */
+#modalCard:has(.modal-back) .ps-hero { padding-top: 66px; }
+@media (max-width: 768px) {
+  .modal-back { top: calc(14px + env(safe-area-inset-top, 0px)); max-width: 62%; }
+}
+
+/* ==========================================================================
+   Filmography window (app.js openFilmography) — 2026-11-13
+   ========================================================================== */
+.pf-head { display: flex; align-items: center; gap: 18px; padding: 30px var(--ps-pad) 6px; }
+#modalCard:has(.modal-back) .pf-head { padding-top: 66px; }
+.pf-photo { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; border: 1px solid rgba(255, 255, 255, .14); background: #22222e; }
+.pf-id { min-width: 0; }
+.pf-id .ps-kick { margin-bottom: 6px; }
+.pf-name { margin: 0; font-size: clamp(24px, 3.4vw, 34px); font-weight: 900; letter-spacing: -.02em; line-height: 1.08; color: #fff; overflow-wrap: anywhere; }
+.pf-count { display: block; margin-top: 4px; font-size: 13px; color: #9aa0ad; font-weight: 700; }
+/* Filters and sort stay in reach while the grid scrolls. */
+.pf-bar { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px; padding: 14px var(--ps-pad) 12px; background: linear-gradient(180deg, var(--bg-2, #12121a) 78%, rgba(18, 18, 26, 0)); }
+.pf-bar .ps-chips { margin: 0; }
+.pf-sort-l { align-self: center; font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: #7d8290; margin-right: 2px; }
+.pf-note { font-size: 12.5px; color: #9aa0ad; }
+.pf-note:empty { display: none; }
+.pf-body { padding-top: 4px; }
+.pf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 22px 18px; }
+.pf-item { width: auto; min-width: 0; }
+.pf-item .ps-item-t { font-size: 14px; }
+/* "See all" on the person sheet */
+.pf-open { margin-left: auto; padding: 6px 12px; border-radius: 999px; cursor: pointer; background: rgba(58, 166, 224, .16); border: 1px solid rgba(58, 166, 224, .4); color: #bfe3ff; font-weight: 800; font-size: 13px; }
+.pf-open:hover { background: rgba(58, 166, 224, .3); }
+.pf-more-tile { flex: 0 0 auto; width: 148px; aspect-ratio: 2 / 3; border-radius: 14px; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; background: rgba(255, 255, 255, .05); border: 1px dashed rgba(255, 255, 255, .2); color: #cfd2da; }
+.pf-more-tile b { font-size: 26px; font-weight: 900; color: #fff; }
+.pf-more-tile span { font-size: 13px; font-weight: 700; }
+.pf-more-tile:hover { background: rgba(58, 166, 224, .14); border-color: rgba(58, 166, 224, .5); }
+@media (max-width: 768px) {
+  .pf-head { gap: 12px; padding-top: 26px; }
+  .pf-photo { width: 48px; height: 48px; }
+  .pf-bar { gap: 8px 12px; padding-top: 10px; }
+  /* One swipeable line each instead of wrapping into four rows. */
+  .pf-bar .ps-chips { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; scrollbar-width: none; touch-action: pan-x; }
+  .pf-bar .ps-chips::-webkit-scrollbar { display: none; }
+  .pf-bar .ps-chip { flex: 0 0 auto; }
+  .pf-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 12px; }
+  .pf-more-tile { width: 124px; }
+}
+
+/* Rails inside a sheet (cast, More like this, the person rails) line up with
+   their headings. They inherited the 40px side padding meant for the page
+   rows, whose titles are themselves inset 40px; a sheet body already has its
+   own padding, so the first poster sat ~40px to the right of the heading
+   above it (iPhone screenshot, 2026-11-13). 2px keeps the card shadow from
+   being clipped. */
+#modalCard .cast-row { padding-left: 2px !important; padding-right: 2px !important; scroll-padding-left: 2px; }

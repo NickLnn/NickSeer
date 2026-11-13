@@ -144,6 +144,26 @@ export function renderImdbInlineBadge(rating, url, votes, id, media, title, year
 }
 window.renderImdbInlineBadge = renderImdbInlineBadge;
 
+// Queue ratings for a whole list in one go (the filmography window). Uses the
+// same batching and cache as the badges; resolves once every id has an answer.
+export function prefetchRatings(items) {
+  const ids = [];
+  for (const it of items || []) {
+    const id = Number(it && it.id); if (!id) continue;
+    ids.push(id);
+    if (it.media) mediaById.set(id, it.media);
+    if (!ratingById.has(id)) pending.add(id);
+  }
+  scheduleFlush();
+  return new Promise((resolve) => {
+    const check = () => { if (ids.every((id) => ratingById.has(id))) resolve(); else setTimeout(check, 200); };
+    check();
+  });
+}
+window.imdbPrefetch = prefetchRatings;
+// undefined = not looked up yet, null = IMDb has no score.
+window.imdbRatingFor = (id) => ratingById.get(Number(id));
+
 function updateBadgeElement(badge) {
   // `dataset` always yields a string, but `ratingById` / `urlById` are keyed by
   // the numeric TMDB id. The lookup below used the raw string and therefore
@@ -168,6 +188,9 @@ function updateBadgeElement(badge) {
   } else if (rating === null && !url) {
     // If resolution definitively returned null and no url exists
     badge.style.display = 'none';
+  } else if (rating === null && scoreEl && scoreEl.textContent === '...') {
+    // Looked up, and IMDb has no score: stop showing the "still loading" dots.
+    scoreEl.textContent = '';
   }
 }
 

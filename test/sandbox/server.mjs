@@ -22,6 +22,7 @@
 
 import http from 'http';
 import crypto from 'crypto';
+import { buildPersonView } from '../../server/services/personview.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -106,8 +107,10 @@ const rows = [];
 // that reads config (the TMDB key) and uses the network; every stubbed service
 // (Plex, Radarr, Sonarr, notifications) stays stubbed, and nothing is written.
 const REAL_ART = process.argv.includes('--real-art');
+let realTmdb = null;
 if (REAL_ART) {
   const tmdb = (await import('../../server/services/tmdb.js')).default;
+  realTmdb = tmdb;
   const real = (r, media) => {
     const it = makeItem(r.title || r.name, String(r.release_date || r.first_air_date || '').slice(0, 4), Math.round((r.vote_average || 0) * 10) / 10 || null, Math.round((r.vote_average || 0) * 10) / 10, media);
     it.poster = tmdb.img(r.poster_path, 'w500');
@@ -571,7 +574,26 @@ function api(pathname, url, body, req) {
   if (pathname === '/api/discover/live/users') return { users: H_USERS.map(([id, name]) => ({ id, name })) };
   if (pathname.startsWith('/api/discover/live/play/')) { const raw = H_STREAM.get(pathname.split('/').pop()); return raw ? { detail: TAUT.sessionDetail(raw) } : { error: 'no stream data for this play' }; }
 
-  if (pathname.startsWith('/api/discover/person/')) return { ...allItems[0], knownFor: allItems.slice(0, 20) };
+  // Person sheet. Both branches go through the real buildPersonView(), so the
+  // sandbox exercises the same ranking/grouping code the server uses.
+  if (pathname.startsWith('/api/discover/person/')) {
+    const pid = pathname.split('/').pop();
+    const isOwned = (k) => Number(k.split(':')[1]) % 3 === 0;
+    if (REAL_ART && realTmdb) return realTmdb.person(pid).then((p) => buildPersonView(p, { isOwned, img: realTmdb.img })).catch((e) => ({ error: e.message }));
+    // Fixture person: real roles, a guest spot, talk shows, an unreleased title, crew jobs.
+    const pick = allItems.slice(0, 26);
+    const raw = (it, i, extra) => ({ id: it.id, media_type: it.media === 'tv' ? 'tv' : 'movie', title: it.title, name: it.title, poster_path: it.poster, backdrop_path: it.backdrop, vote_average: it.rating, vote_count: 400 + i * 173, popularity: 5 + i, release_date: `${2003 + (i % 22)}-05-1${i % 9}`, first_air_date: `${2003 + (i % 22)}-05-1${i % 9}`, genre_ids: [18], ...extra });
+    const cast = pick.map((it, i) => raw(it, i, { character: `Character ${i + 1}`, order: i % 8, episode_count: it.media === 'tv' ? 3 + i : undefined }));
+    cast.push(raw(allItems[30], 30, { media_type: 'tv', character: 'Self - Guest', genre_ids: [10767], popularity: 900, episode_count: 2 }));
+    cast.push(raw(allItems[31], 31, { media_type: 'tv', character: 'Self', genre_ids: [10767], popularity: 800, episode_count: 1 }));
+    cast.push(raw(allItems[32], 32, { character: 'A Very Long Character Name That Goes On / Another Persona', release_date: '2099-01-01' }));
+    const crew = allItems.slice(40, 46).map((it, i) => raw(it, 40 + i, { job: i % 2 ? 'Director' : 'Executive Producer' }));
+    return buildPersonView({
+      id: Number(pid) || 1, name: 'Sandbox Person', known_for_department: 'Acting', profile_path: `/sandbox-poster/${allItems[3].id}.svg`,
+      biography: 'Sandbox Person (born 18 June 1986) is a fixture actor. '.repeat(14), birthday: '1986-06-18', place_of_birth: 'Elderslie, Renfrewshire, Scotland, UK',
+      external_ids: { imdb_id: 'nm0000001' }, combined_credits: { cast, crew }
+    }, { isOwned });
+  }
   if (pathname === '/api/request/options') return { profiles: [], rootFolders: [], tags: [] };
   if (pathname === '/api/settings/users') return { users: [] };
 
@@ -666,10 +688,10 @@ const server = http.createServer((req, res) => {
   if (pathname.startsWith('/api/')) {
     let raw = '';
     req.on('data', (c) => { raw += c; });
-    return req.on('end', () => {
+    return req.on('end', async () => {
       let body = null;
       try { body = raw ? JSON.parse(raw) : null; } catch { /* not json */ }
-      const result = api(pathname, url, body, req);
+      const result = await api(pathname, url, body, req);
       const status = (result && result.__status) || 200;
       const payload = JSON.stringify(result);
       const slow = /^\/api\/discover\/(movie|tv)\/\d+$/.test(pathname) ? DETAIL_DELAY_MS
