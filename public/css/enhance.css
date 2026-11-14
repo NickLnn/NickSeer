@@ -4178,3 +4178,25 @@ html:not([data-input="keys"]) .icon-btn:focus-visible {
    above it (iPhone screenshot, 2026-11-13). 2px keeps the card shadow from
    being clipped. */
 #modalCard .cast-row { padding-left: 2px !important; padding-right: 2px !important; scroll-padding-left: 2px; }
+
+/* Person sheet: release date under a "Coming up" tile, and the "In development" list. */
+.ps-item-d { margin-top: 3px; font-size: 12px; font-weight: 800; color: #8fd0ff; }
+.ps-ann { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px 12px; }
+.ps-ann-i { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 14px; cursor: pointer; outline: none; background: rgba(255, 255, 255, .04); border: 1px solid rgba(255, 255, 255, .07); }
+.ps-ann-i:hover, .ps-ann-i:focus-visible, .ps-ann-i.nav-focus { background: rgba(255, 255, 255, .08); border-color: rgba(255, 255, 255, .16); }
+.ps-ann-p { width: 40px; height: 60px; border-radius: 7px; object-fit: cover; background: rgba(255, 255, 255, .06); }
+.ps-ann-p.ph { display: grid; place-items: center; font-size: 17px; opacity: .75; }
+.ps-ann-t { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ps-ann-t b { font-size: 14px; font-weight: 700; color: #f0f0f5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ps-ann-t i { font-style: normal; font-size: 12.5px; color: #9aa0ad; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ps-ann-add { width: 32px; height: 32px; border-radius: 50%; border: 1px solid rgba(58, 166, 224, .45); background: rgba(58, 166, 224, .16); color: #bfe3ff; font-size: 16px; font-weight: 800; cursor: pointer; display: grid; place-items: center; }
+.ps-ann-add:hover { background: rgba(58, 166, 224, .34); }
+/* In the filmography window a tile fills its grid cell; in a rail it keeps the
+   rail width. (The preview rail used the grid's "width: auto" and its tiles
+   took whatever size their content happened to be.) */
+.pf-grid > .ps-item { width: auto; min-width: 0; }
+.pf-grid > .ps-item .ps-item-t { font-size: 14px; }
+/* A tile with no artwork is the same shape as one with a poster. */
+.ps-item > .card { aspect-ratio: 2 / 3; }
+.ps-item > .card > .card-fallback-art, .ps-item > .card > .card-fallback { width: 100%; height: 100%; aspect-ratio: auto; box-sizing: border-box; }
+@media (max-width: 768px) { .ps-ann { grid-template-columns: minmax(0, 1fr); } }

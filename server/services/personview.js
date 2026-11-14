@@ -81,10 +81,6 @@ export function buildPersonView(p, { isOwned = () => false, img = (x) => x, toda
     knownFor = knownFor.concat(extra).slice(0, 20);
   }
 
-  // Dated in the future, or announced with no date yet.
-  const upcoming = roles.filter((e) => e.raw.poster_path && (!dateOf(e.raw) || dateOf(e.raw) > today))
-    .sort((a, b) => (dateOf(a.raw) || '9999').localeCompare(dateOf(b.raw) || '9999')).slice(0, 12).map(item);
-
   // ---- behind the camera ---------------------------------------------------
   const crewMap = new Map();
   for (const c of (p.combined_credits?.crew || [])) {
@@ -109,7 +105,7 @@ export function buildPersonView(p, { isOwned = () => false, img = (x) => x, toda
   }
   inLibrary.sort((a, b) => b.popularity - a.popularity);
 
-  // ---- filmography: every real role and crew job, newest first ---------------
+  // ---- every real role and crew job, one entry per title ---------------------
   const filmSeen = new Map();
   for (const e of roles) { const it = item(e); filmSeen.set(it.media + ':' + it.id, { ...it, role: it.character ? `as ${it.character}` : '' }); }
   for (const e of crewAll) {
@@ -117,10 +113,20 @@ export function buildPersonView(p, { isOwned = () => false, img = (x) => x, toda
     if (prev) prev.role = [prev.role, it.job].filter(Boolean).join(' · ');
     else filmSeen.set(k, { ...it, role: it.job });
   }
-  const filmography = [...filmSeen.values()]
-    .sort((a, b) => (b.date || '9999').localeCompare(a.date || '9999'))
-    .slice(0, 150)
-    .map(({ backdrop, popularity, appearance, ...keep }) => keep);
+  // …split three ways by where the title is in its life. They used to be one
+  // list with the undated ones on top, so a filmography opened on a row of
+  // blank "TBA" tiles (Nick, 2026-11-13):
+  //   filmography  released — what the person has actually made
+  //   upcoming     has a release date in the future
+  //   announced    no date yet (in development; usually no poster either)
+  const slim = ({ backdrop, appearance, ...keep }) => keep;
+  const everything = [...filmSeen.values()];
+  const filmography = everything.filter((f) => f.date && f.date <= today)
+    .sort((a, b) => b.date.localeCompare(a.date)).slice(0, 400).map(slim);
+  const upcoming = everything.filter((f) => f.date && f.date > today)
+    .sort((a, b) => a.date.localeCompare(b.date)).slice(0, 30).map(slim);
+  const announced = everything.filter((f) => !f.date)
+    .sort((a, b) => (b.popularity - a.popularity) || a.title.localeCompare(b.title)).slice(0, 40).map(slim);
 
   // ---- facts -------------------------------------------------------------------
   // From every credit (the list above is capped), ignoring anything dated before
@@ -151,10 +157,12 @@ export function buildPersonView(p, { isOwned = () => false, img = (x) => x, toda
       series: filmography.filter((f) => f.media === 'tv').length,
       crew: crewAll.length,
       appearances: acting.length - roles.length,
+      upcoming: upcoming.length,
+      announced: announced.length,
       from: years.length ? Math.min(...years) : null,
       to: years.length ? Math.max(...years) : null
     },
-    inLibrary, knownFor, upcoming, crewKnownFor, filmography
+    inLibrary, knownFor, upcoming, announced, crewKnownFor, filmography
   };
 }
 

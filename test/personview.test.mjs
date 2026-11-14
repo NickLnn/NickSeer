@@ -27,12 +27,16 @@ assert.equal(v.filmography.filter((f) => f.owned).length, 1);
 assert.ok(!v.filmography.some((f) => f.id === 90));
 console.log('ok  library counts agree');
 
-// 3) Unreleased titles go to "Coming up", not "Known for"; filmography is newest first with undated on top.
-v = view([c(1), c(2, { release_date: '2027-03-01' }), c(3, { release_date: '' }), c(4, { release_date: '2020-01-01' })]);
-assert.deepEqual(v.upcoming.map((k) => k.id), [2, 3]);
+// 3) Released, dated-future and undated titles are three separate lists.
+v = view([c(1), c(2, { release_date: '2027-03-01' }), c(3, { release_date: '', poster_path: null }), c(4, { release_date: '2020-01-01' }), c(5, { release_date: '2026-12-25' })],
+  [c(6, { job: 'Director', release_date: '2028-01-01' }), c(7, { job: 'Producer', release_date: '' })]);
+assert.deepEqual(v.filmography.map((f) => f.id), [4, 1], 'filmography = released only, newest first');
+assert.deepEqual(v.upcoming.map((k) => k.id), [5, 2, 6], 'upcoming = dated in the future, soonest first, crew included');
+assert.deepEqual(v.announced.map((k) => k.id).sort(), [3, 7], 'announced = no date, poster or not');
 assert.deepEqual(v.knownFor.map((k) => k.id).sort(), [1, 4]);
-assert.deepEqual(v.filmography.map((f) => f.id), [3, 2, 4, 1]);
-console.log('ok  upcoming and ordering');
+assert.equal(v.counts.total, 2); assert.equal(v.counts.upcoming, 3); assert.equal(v.counts.announced, 2);
+assert.ok(v.upcoming[0].role.startsWith('as '), 'upcoming carries the role');
+console.log('ok  released / upcoming / announced are separate');
 
 // 4) A host is known for their own show (20+ episodes as themselves).
 v = view([tv(7, { name: 'Own Show', genre_ids: [10767], character: 'Self - Host', episode_count: 3000 }), c(1)]);

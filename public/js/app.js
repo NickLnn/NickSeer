@@ -1934,13 +1934,29 @@ function personCard(m) {
   if (!m.owned && !(st && (st.status === 'requested' || st.status === 'in_library'))) {
     c.appendChild(el('button', { class: 'ps-add', 'data-nav': '', title: 'Request', 'aria-label': `Request ${m.title}`, onclick: (e) => { e.stopPropagation(); openRequestModal(m); } }, '＋'));
   }
-  const sub = m.job || (m.character ? `as ${m.character}` : '') || (m.date ? '' : 'Announced');
+  const sub = m.role || m.job || (m.character ? `as ${m.character}` : '');
   const eps = m.media === 'tv' && m.episodes > 1 ? `${m.episodes} episodes` : '';
   return el('div', { class: 'ps-item' }, [
     c,
-    el('div', { class: 'ps-item-t' }, m.title + (m.year ? ` (${m.year})` : '')),
+    el('div', { class: 'ps-item-t' }, m.title + (m.year && !m.when ? ` (${m.year})` : '')),
+    m.when ? el('div', { class: 'ps-item-d' }, m.when) : null,
     sub || eps ? el('div', { class: 'ps-item-s' }, [sub, eps].filter(Boolean).join(' · ')) : null
   ]);
+}
+// Titles with no release date yet. Most have no poster, so this is a compact
+// list, not a row of blank tiles.
+function psAnnounced(list) {
+  const wrap = el('div', { class: 'ps-ann' });
+  list.forEach((f) => {
+    const r = el('div', { class: 'ps-ann-i', tabindex: '0', 'data-nav': '', role: 'button', onclick: () => openDetail(f), onpointerdown: () => prefetchDetail(f) }, [
+      f.poster ? el('img', { class: 'ps-ann-p', src: tmdbSized(f.poster, 'w92'), loading: 'lazy', decoding: 'async', alt: '' }) : el('span', { class: 'ps-ann-p ph', 'aria-hidden': 'true' }, f.media === 'tv' ? '📺' : '🎬'),
+      el('span', { class: 'ps-ann-t' }, [el('b', {}, f.title), el('i', {}, [f.media === 'tv' ? 'Series' : 'Film', f.role].filter(Boolean).join(' · '))]),
+      el('button', { class: 'ps-ann-add', 'data-nav': '', title: 'Request', 'aria-label': `Request ${f.title}`, onclick: (e) => { e.stopPropagation(); openRequestModal(f); } }, '＋')
+    ]);
+    r.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === r) openDetail(f); });
+    wrap.appendChild(r);
+  });
+  return wrap;
 }
 function psSection(title, count, node, hint) {
   return el('section', { class: 'ps-sec' }, [
@@ -1959,10 +1975,10 @@ function filmCard(f) {
   const c = card(f);
   if (!f.owned) c.appendChild(el('button', { class: 'ps-add', 'data-nav': '', title: 'Request', 'aria-label': `Request ${f.title}`, onclick: (e) => { e.stopPropagation(); openRequestModal(f); } }, '＋'));
   const eps = f.media === 'tv' && f.episodes > 1 ? `${f.episodes} episodes` : '';
-  return el('div', { class: 'ps-item pf-item' }, [
+  return el('div', { class: 'ps-item' }, [
     c,
     el('div', { class: 'ps-item-t' }, f.title),
-    el('div', { class: 'ps-item-s' }, [f.year || 'TBA', f.role, eps].filter(Boolean).join(' · '))
+    el('div', { class: 'ps-item-s' }, [f.year, f.role, eps].filter(Boolean).join(' · '))
   ]);
 }
 // The score a title is sorted by: IMDb when it is known (that is the number on
@@ -2099,7 +2115,7 @@ async function openPerson(person) {
     stat(counts.library || 0, 'In your library', (counts.library || 0) > 0),
     counts.movies ? stat(counts.movies, counts.movies === 1 ? 'Film' : 'Films') : null,
     counts.series ? stat(counts.series, 'Series') : null,
-    (p.upcoming || []).length ? stat(p.upcoming.length, 'Coming up') : null,
+    ((p.upcoming || []).length + (p.announced || []).length) ? stat((p.upcoming || []).length + (p.announced || []).length, 'Coming up') : null,
     p.imdbUrl ? el('a', { class: 'btn btn-imdb ps-imdb', 'data-nav': '', href: p.imdbUrl, target: '_blank', rel: 'noopener' }, 'IMDb ↗') : null
   ]);
 
@@ -2137,7 +2153,9 @@ async function openPerson(person) {
   const main = lead ? crew : acting;
   const other = lead ? acting : crew;
   if (main.length) body.appendChild(psSection('Known for', null, psRail(main), 'tap ＋ to request'));
-  if ((p.upcoming || []).length) body.appendChild(psSection('Coming up', p.upcoming.length, psRail(p.upcoming)));
+  // Coming up = has a release date; In development = announced, no date yet.
+  if ((p.upcoming || []).length) body.appendChild(psSection('Coming up', p.upcoming.length, psRail(p.upcoming.map((m) => ({ ...m, when: psDate(m.date) }))), 'release date set'));
+  if ((p.announced || []).length) body.appendChild(psSection('In development', p.announced.length, psAnnounced(p.announced), 'announced, no date yet'));
   if (other.length >= (lead ? 3 : 1)) body.appendChild(psSection(lead ? 'Also appears in' : 'Behind the camera', null, psRail(other)));
   // Filmography: the latest few here, everything in its own window.
   const films = p.filmography || [];
